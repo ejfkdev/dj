@@ -117,6 +117,7 @@ func main() {
 	registry.Register(plugins.NewModernJSPlugin())
 	registry.Register(plugins.NewURLPatternPlugin())
 	registry.Register(plugins.NewSourceMapPlugin())
+	registry.Register(plugins.NewUmiJSPlugin())
 
 	// 创建 Pipeline
 	pipeline := extractor.NewPipeline(registry)

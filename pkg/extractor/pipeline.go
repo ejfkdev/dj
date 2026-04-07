@@ -749,14 +749,17 @@ func (p *Pipeline) processResults(ctx context.Context, results []*Result, source
 				// 优先使用 source URL 的目录
 				fromDir := GetDirFromURL(discovered.FromURL)
 				if fromDir != "" {
-					discovered.FromPlugin = r.FromPlugin
 					fullURL := fromDir + discovered.URL
 					normalizedURL := NormalizeURL(fullURL)
 					if p.Debug {
 						p.debugLog("Fragment (from dir): %s -> %s", discovered.URL, normalizedURL)
 					}
 					if !p.knowledge.IsSeenURL(normalizedURL) {
-						p.tryEnqueue(normalizedURL, &discovered)
+						p.tryEnqueue(normalizedURL, &DiscoveredJS{
+							URL:        normalizedURL,
+							FromURL:    discovered.FromURL,
+							FromPlugin: r.FromPlugin,
+						})
 					}
 				}
 
@@ -772,7 +775,6 @@ func (p *Pipeline) processResults(ctx context.Context, results []*Result, source
 						p.debugLog("Fragment (from prepend): %s -> %s", discovered.URL, normalizedURL)
 					}
 					if !p.knowledge.IsSeenURL(normalizedURL) {
-						discovered.FromPlugin = r.FromPlugin
 						p.tryEnqueue(normalizedURL, &DiscoveredJS{
 							URL:        normalizedURL,
 							FromURL:    discovered.FromURL,
@@ -1032,6 +1034,19 @@ func (p *Pipeline) probeFragment(fragment, sourceURL string) []string {
 		for domain := range domains {
 			candidate := joinURLPath(domain, fullPath)
 			candidates = append(candidates, candidate)
+		}
+
+		// 备用：如果 fragment 是根相对路径（以 / 开头），直接与 sourceURL 域名拼接
+		// 例如 /p__Login.94493893.async.js -> https://bigdata.xingyeai.com/p__Login.94493893.async.js
+		if strings.HasPrefix(fragment, "/") {
+			sourceDomain := ""
+			if parsed, err := url.Parse(sourceURL); err == nil && parsed.Host != "" {
+				sourceDomain = parsed.Scheme + "://" + parsed.Host
+			}
+			if sourceDomain != "" {
+				candidate := sourceDomain + fragment
+				candidates = append(candidates, candidate)
+			}
 		}
 	}
 
