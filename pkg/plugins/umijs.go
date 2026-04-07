@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"regexp"
+	"strconv"
 
 	"github.com/ejfkdev/dj/pkg/extractor"
 )
@@ -23,6 +24,10 @@ type UmiJSPlugin struct {
 	chunkMapRe *regexp.Regexp
 	// 匹配 location.pathname 的使用
 	pathnameRe *regexp.Regexp
+	// 匹配 {id}:"{name}" 映射 (用于 umi.js 的 name+hash 模式)
+	nameMapRe *regexp.Regexp
+	// 匹配 {id}:"{hash}" 映射 (8位以上的hex)
+	hashMapRe *regexp.Regexp
 }
 
 // NewUmiJSPlugin 创建插件
@@ -39,6 +44,14 @@ func NewUmiJSPlugin() *UmiJSPlugin {
 		chunkMapRe: regexp.MustCompile(`\[(\d+)\]`),
 		// 匹配 location.pathname
 		pathnameRe: regexp.MustCompile(`location\.pathname`),
+		// 匹配 {或, 分隔的 {id}:"{name}" 映射
+		// 实际格式: {46:"p__h5__bindConfirm",104:"p__sso__logout",...}
+		// names contain underscore (p__xxx or xxx__xxx)
+		nameMapRe: regexp.MustCompile(`[{,](\d+):"([a-zA-Z0-9]*_[a-zA-Z0-9_]+)"`),
+		// 匹配 {或, 分隔的 {id}:"{hash}" 映射 (8位以上的纯hex)
+		// 实际格式: {46:"b891323a",71:"fc71ff65",...}
+		// hashes are ONLY hex digits, no underscore
+		hashMapRe: regexp.MustCompile(`[{,](\d+):"([a-f0-9]{8,})"`),
 	}
 }
 
@@ -54,6 +67,7 @@ func (p *UmiJSPlugin) Precheck(ctx context.Context, input *extractor.AnalyzeInpu
 		[]byte("preload_helper"),
 		[]byte("publicPath"),
 		[]byte("location.pathname"),
+		[]byte("p__"),
 	})
 }
 
@@ -118,6 +132,64 @@ func (p *UmiJSPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInput
 					for chunkID, filename := range chunkIDToFile {
 						_ = chunkID // 已使用的变量
 						url := publicPath + filename
+						result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
+							URL:      url,
+							FromURL:  input.SourceURL,
+							IsInline: false,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// 5. umi.js name+hash 映射模式: ({46:"p__h5__bindConfirm",...}[e]||e)+"."+{46:"b891323a",...}[e]+".async.js"
+	// 提取所有 {id}:"{name}" 映射
+	idToName := make(map[int]string)
+	for _, match := range p.nameMapRe.FindAllStringSubmatch(content, -1) {
+		if len(match) > 2 {
+			id := parseInt(match[1])
+			name := match[2]
+			idToName[id] = name
+		}
+	}
+	// 提取所有 {id}:"{hash}" 映射
+	idToHash := make(map[int]string)
+	for _, match := range p.hashMapRe.FindAllStringSubmatch(content, -1) {
+		if len(match) > 2 {
+			id := parseInt(match[1])
+			hash := match[2]
+			idToHash[id] = hash
+		}
+	}
+	// 如果找到了映射表，生成所有可能的 chunk URL
+	if len(idToName) > 0 && len(idToHash) > 0 {
+		generated := make(map[string]bool)
+		for id, name := range idToName {
+			if hash, ok := idToHash[id]; ok {
+				// 格式: {name}.{hash}.async.js
+				filename := name + "." + hash + ".async.js"
+				if !generated[filename] {
+					generated[filename] = true
+					url := publicPath + filename
+					if !containsProbeTarget(result.ProbeTargets, url) {
+						result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
+							URL:      url,
+							FromURL:  input.SourceURL,
+							IsInline: false,
+						})
+					}
+				}
+			}
+		}
+		// 同时生成只有 hash 的情况（如 {id}.{hash}.async.js）
+		for id, hash := range idToHash {
+			if _, ok := idToName[id]; !ok {
+				filename := strconv.Itoa(id) + "." + hash + ".async.js"
+				if !generated[filename] {
+					generated[filename] = true
+					url := publicPath + filename
+					if !containsProbeTarget(result.ProbeTargets, url) {
 						result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
 							URL:      url,
 							FromURL:  input.SourceURL,

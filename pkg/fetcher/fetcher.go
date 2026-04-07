@@ -1,6 +1,8 @@
 package fetcher
 
 import (
+	"compress/gzip"
+	"compress/zlib"
 	"errors"
 	"io"
 	"net/http"
@@ -94,6 +96,7 @@ func (f *Fetcher) newRequest(url string) (*http.Request, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", f.userAgent)
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
 	return req, nil
 }
 
@@ -133,8 +136,14 @@ func (f *Fetcher) Fetch(url string) ([]byte, error) {
 		return nil, errors.New("HTTP status: " + resp.Status)
 	}
 
+	// 解压响应体
+	body, err := decompressResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+
 	// 限制响应体大小
-	limited := &limitedReader{r: resp.Body, remain: MaxBodySize}
+	limited := &limitedReader{r: body, remain: MaxBodySize}
 	content, err := io.ReadAll(limited)
 	if err != nil {
 		if errors.Is(err, ErrBodyTooLarge) {
@@ -158,8 +167,14 @@ func (f *Fetcher) FetchWithStatus(url string) (*FetchResult, error) {
 	}
 	defer resp.Body.Close()
 
+	// 解压响应体
+	body, err := decompressResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+
 	// 限制响应体大小
-	limited := &limitedReader{r: resp.Body, remain: MaxBodySize}
+	limited := &limitedReader{r: body, remain: MaxBodySize}
 	content, err := io.ReadAll(limited)
 	if err != nil {
 		if errors.Is(err, ErrBodyTooLarge) {
@@ -189,4 +204,28 @@ func (f *Fetcher) FetchWithStatusHead(url string) (*FetchResult, error) {
 		ContentType: resp.Header.Get("Content-Type"),
 		Headers:     resp.Header,
 	}, nil
+}
+
+// decompressResponse 根据 Content-Encoding 解压响应体
+func decompressResponse(resp *http.Response) (io.Reader, error) {
+	switch resp.Header.Get("Content-Encoding") {
+	case "gzip":
+		gz, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		return gz, nil
+	case "deflate":
+		zr, err := zlib.NewReader(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		return zr, nil
+	case "br":
+		// brotli - Go 1.23+ has built-in brotli support via compress/brotli
+		// 如果不支持 brotli，使用 identity (不压缩)
+		return resp.Body, nil
+	default:
+		return resp.Body, nil
+	}
 }

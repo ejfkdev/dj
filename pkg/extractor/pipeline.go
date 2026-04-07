@@ -218,7 +218,7 @@ func (p *Pipeline) probeSourceMap(jsURL string) {
 	if p.knowledge.JSHasSourceMap(jsURL) {
 		return
 	}
-	mapURL := jsURL + ".map"
+	mapURL := buildSourceMapURL(jsURL)
 	// 检查是否已探测过
 	if p.knowledge.IsSeenURL(mapURL) {
 		return
@@ -297,7 +297,19 @@ func (p *Pipeline) saveJSToCache(url string, content []byte) {
 		return
 	}
 
-	if err := p.cacheConfig.SaveToCache(p.baseURL, "js", path, content); err != nil {
+	// 提取 host 部分（用于生成扁平化文件名）
+	host := extractHost(p.baseURL)
+
+	// 去掉路径前导 /，将路径中的 / 替换为 -
+	path = strings.TrimPrefix(path, "/")
+	path = strings.ReplaceAll(path, "/", "-")
+
+	// 组合文件名: host-path.js (如果 path 不以 .js/.mjs/.css 结尾才加)
+	filename := host + "-" + path
+	if !strings.HasSuffix(filename, ".js") && !strings.HasSuffix(filename, ".mjs") && !strings.HasSuffix(filename, ".css") {
+		filename += ".js"
+	}
+	if err := p.cacheConfig.SaveToCache(p.baseURL, "js", filename, content); err != nil {
 		if p.Debug {
 			p.debugLog("saveJSToCache failed: %v", err)
 		}
@@ -1053,6 +1065,26 @@ func (p *Pipeline) probeFragment(fragment, sourceURL string) []string {
 	return unique(candidates)
 }
 
+// extractHost 从 baseURL 中提取 host 部分，用于生成扁平化缓存路径
+// https://example.com/login -> example.com-login
+// https://example.com:8080/aa/bb -> example.com_8080-aa-bb
+func extractHost(baseURL string) string {
+	host := baseURL
+	// 去掉尾部斜杠
+	host = strings.TrimSuffix(host, "/")
+	// 去掉协议
+	if strings.HasPrefix(host, "https://") {
+		host = host[8:]
+	} else if strings.HasPrefix(host, "http://") {
+		host = host[7:]
+	}
+	// 替换冒号为下划线（保留端口）
+	host = strings.ReplaceAll(host, ":", "_")
+	// 将路径中的 / 替换为 -
+	host = strings.ReplaceAll(host, "/", "-")
+	return host
+}
+
 // unique 去重
 func unique(ss []string) []string {
 	seen := make(map[string]bool)
@@ -1169,7 +1201,9 @@ func (p *Pipeline) GetOutputResult() *OutputResult {
 
 	// 设置缓存目录
 	if p.cacheConfig != nil && p.cacheConfig.Enable && p.baseURL != "" {
-		result.CacheBase = p.cacheConfig.GetCacheRoot(p.baseURL)
+		// 使用与 saveJSToCache 相同的 host 提取逻辑
+		host := extractHost(p.baseURL)
+		result.CacheBase = filepath.Join(p.cacheConfig.BaseDir, "https_"+host)
 		result.CacheDirs = &CacheDirs{
 			JS: filepath.Join(result.CacheBase, "js"),
 			HTML: filepath.Join(result.CacheBase, "html", "web.html"),
@@ -1199,4 +1233,33 @@ func countFilesInDir(dir string) int {
 		}
 	}
 	return count
+}
+
+// buildSourceMapURL 为 JS URL 构建 source map URL
+// 处理带查询参数的 JS URL，如：
+// 输入: https://example.com/js/app.js?v=123
+// 输出: https://example.com/js/app.js.map?v=123
+func buildSourceMapURL(jsURL string) string {
+	// 分离 path 和 query
+	path, query, found := strings.Cut(jsURL, "?")
+	if !found {
+		query = ""
+	}
+
+	// 在 .js 后面插入 .map（如果有 .js 后缀）
+	var mapPath string
+	if strings.HasSuffix(path, ".js") {
+		mapPath = path + ".map"
+	} else if strings.HasSuffix(path, ".mjs") {
+		mapPath = path + ".map"
+	} else if strings.HasSuffix(path, ".css") {
+		mapPath = path + ".map"
+	} else {
+		mapPath = path + ".map"
+	}
+
+	if query != "" {
+		return mapPath + "?" + query
+	}
+	return mapPath
 }
