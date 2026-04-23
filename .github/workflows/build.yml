@@ -38,18 +38,15 @@ jobs:
           CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${TAG}" -o "${output}" .
 
       - name: Install UPX
+        if: matrix.goos == 'linux'
         uses: crazy-max/ghaction-upx@v3
         with:
           version: latest
 
       - name: Compress with UPX
-        if: matrix.goos != 'darwin'
+        if: matrix.goos == 'linux'
         run: |
-          ext=""
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            ext=".exe"
-          fi
-          output="dj-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
+          output="dj-${{ matrix.goos }}-${{ matrix.goarch }}"
           upx -9 "${output}"
 
       - name: Upload artifacts
