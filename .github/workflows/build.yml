@@ -43,6 +43,7 @@ jobs:
           version: latest
 
       - name: Compress with UPX
+        if: matrix.goos != 'darwin'
         run: |
           ext=""
           if [ "${{ matrix.goos }}" = "windows" ]; then
