@@ -25,6 +25,9 @@ jobs:
           go-version: '1.26'
 
       - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
           ext=""
           if [ "${{ matrix.goos }}" = "windows" ]; then
