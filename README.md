@@ -19,7 +19,11 @@
 - Smart detection of dynamic loading patterns: import(), require(), webpack chunks, vite preload, etc.
 - Support for multiple frontend framework chunk mappings: Next.js, Nuxt.js, Vite, SvelteKit, Webpack, and more
 - Automatic Source Map discovery
-- Custom User-Agent and proxy support
+- TLS fingerprint spoofing (uTLS Chrome fingerprint) to bypass Cloudflare and other WAFs
+- HTTP/2 and HTTP/1.1 protocol auto-negotiation
+- SOCKS5/HTTP/HTTPS proxy support with authentication
+- Environment variable proxy configuration (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, etc.)
+- Custom User-Agent and browser-like request headers
 - Multiple output formats: text, JSON, markdown
 
 ## Installation
@@ -70,7 +74,8 @@ dj -f md https://example.com
 | `--cache` | Enable caching (enabled by default) |
 | `--cache=false` | Disable caching |
 | `--useragent=<UA>` | Custom User-Agent string |
-| `--proxy=<URL>` | HTTP proxy URL |
+| `--proxy=<URL>` | Proxy URL (http/https/socks5), overrides environment variables |
+| `--cookie=<cookies>` | Cookies for bypassing Cloudflare (e.g., `"cf_clearance=xxx"`) |
 | `-h` | Show help information |
 
 ### Examples
@@ -79,8 +84,26 @@ dj -f md https://example.com
 # Custom User-Agent
 dj --useragent="Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) ..." https://example.com
 
-# Use proxy
+# Use HTTP proxy
 dj --proxy="http://127.0.0.1:7890" https://example.com
+
+# Use SOCKS5 proxy
+dj --proxy="socks5://127.0.0.1:1080" https://example.com
+
+# Use HTTPS proxy
+dj --proxy="https://proxy.example.com:443" https://example.com
+
+# Proxy with authentication
+dj --proxy="socks5://user:pass@127.0.0.1:1080" https://example.com
+
+# Use environment variable proxy (HTTPS_PROXY, HTTP_PROXY, ALL_PROXY)
+HTTPS_PROXY=http://127.0.0.1:7890 dj https://example.com
+
+# Bypass proxy for specific hosts
+ALL_PROXY=socks5://127.0.0.1:1080 NO_PROXY=localhost,example.com dj https://example.com
+
+# Inject cookies for Cloudflare bypass
+dj --cookie="cf_clearance=xxx" https://example.com
 
 # Enable debug mode
 dj --debug https://example.com

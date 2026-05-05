@@ -19,7 +19,11 @@
 - 智能探测动态加载模式：import()、require()、webpack chunk、vite preload 等
 - 支持多种前端框架的 chunk 映射：Next.js、Nuxt.js、Vite、SvelteKit、Webpack 等
 - 自动发现 Source Map 关联和位置
-- 支持自定义 User-Agent 和代理
+- TLS 指纹伪装（uTLS Chrome 指纹），绕过 Cloudflare 等 WAF
+- HTTP/2 和 HTTP/1.1 协议自动协商
+- SOCKS5/HTTP/HTTPS 代理支持，支持认证
+- 环境变量代理配置（`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 等）
+- 自定义 User-Agent 和浏览器请求头模拟
 - 多种输出格式：text、json、markdown
 
 ## 安装
@@ -70,7 +74,8 @@ dj -f md https://example.com
 | `--cache` | 启用缓存（默认启用） |
 | `--cache=false` | 禁用缓存 |
 | `--useragent=<UA>` | 自定义 User-Agent |
-| `--proxy=<URL>` | HTTP 代理地址 |
+| `--proxy=<URL>` | 代理地址（http/https/socks5），优先级高于环境变量 |
+| `--cookie=<cookies>` | 注入 Cookie 绕过 Cloudflare（如 `"cf_clearance=xxx"`） |
 | `-h` | 显示帮助信息 |
 
 ### 示例
@@ -79,8 +84,26 @@ dj -f md https://example.com
 # 自定义 User-Agent
 dj --useragent="Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) ..." https://example.com
 
-# 使用代理
+# 使用 HTTP 代理
 dj --proxy="http://127.0.0.1:7890" https://example.com
+
+# 使用 SOCKS5 代理
+dj --proxy="socks5://127.0.0.1:1080" https://example.com
+
+# 使用 HTTPS 代理
+dj --proxy="https://proxy.example.com:443" https://example.com
+
+# 带认证的代理
+dj --proxy="socks5://user:pass@127.0.0.1:1080" https://example.com
+
+# 使用环境变量代理（HTTPS_PROXY、HTTP_PROXY、ALL_PROXY）
+HTTPS_PROXY=http://127.0.0.1:7890 dj https://example.com
+
+# 跳过指定主机的代理
+ALL_PROXY=socks5://127.0.0.1:1080 NO_PROXY=localhost,example.com dj https://example.com
+
+# 注入 Cookie 绕过 Cloudflare
+dj --cookie="cf_clearance=xxx" https://example.com
 
 # 启用调试模式
 dj --debug https://example.com

@@ -27,41 +27,30 @@ func GetTempDir() string {
 	return "/tmp/ejfkdev/dj"
 }
 
-// NormalizeOrigin 规范化 origin 部分
-// https://test.com:8080 → https_test.com:8080
+// NormalizeOrigin 规范化 origin 部分（Windows 安全）
+// https://test.com:8080 → https_test.com_8080
 func NormalizeOrigin(url string) string {
-	// 将 scheme:// 替换为 scheme_
-	// https://test.com:8080/aa → https_test.com:8080_aa
 	url = strings.ReplaceAll(url, "https://", "https_")
 	url = strings.ReplaceAll(url, "http://", "http_")
-	// 将路径中的 / 替换为 _
-	// 如果有路径，保留 host:port 格式
+	url = strings.ReplaceAll(url, ":", "_")
+	url = strings.ReplaceAll(url, "/", "_")
 	return url
 }
 
-// NormalizePathForFile 规范化路径用于文件名
+// NormalizePathForFile 规范化路径用于文件名（Windows 安全）
 // /aa/bb/static/js/app.js → aa_bb_static_js_app.js
 func NormalizePathForFile(path string) string {
-	// 去掉前导 /
-	if strings.HasPrefix(path, "/") {
-		path = path[1:]
-	}
-	// 去掉尾随 /
-	if strings.HasSuffix(path, "/") {
-		path = strings.TrimSuffix(path, "/")
-	}
+	path = strings.TrimPrefix(path, "/")
+	path, _ = strings.CutSuffix(path, "/")
 
-	// 防止路径遍历：移除 .. 和 . 等特殊成分
-	// 清理任何 .. 父目录引用和 . 当前目录引用
+	// 防止路径遍历
 	path = strings.ReplaceAll(path, "..", "_")
 	path = strings.ReplaceAll(path, "./", "_")
 	path = strings.ReplaceAll(path, "/./", "_")
 
-	// 将 / 替换为 _
-	path = strings.ReplaceAll(path, "/", "_")
+	// 替换路径分隔符和 Windows 不安全字符
+	path = strings.Map(sanitizeFilenameRune, path)
 
-	// 再次检查清理后的路径是否安全
-	// 如果包含 .. 返回空字符串让调用方处理
 	if strings.Contains(path, "..") {
 		return ""
 	}
@@ -69,9 +58,19 @@ func NormalizePathForFile(path string) string {
 	return path
 }
 
+// sanitizeFilenameRune 将文件名不安全字符替换为下划线
+func sanitizeFilenameRune(r rune) rune {
+	switch r {
+	case '/', '\\', '<', '>', ':', '"', '|', '?', '*', '\x00':
+		return '_'
+	default:
+		return r
+	}
+}
+
 // GetCacheRoot 获取缓存根目录
 // 输入: https://test.com:8080/aa
-// 输出: /tmp/ejfkdev/dj/https_test.com:8080_aa
+// 输出: /tmp/ejfkdev/dj/https_test.com_8080_aa
 func (c *CacheConfig) GetCacheRoot(baseURL string) string {
 	normalized := NormalizeOrigin(baseURL)
 	return filepath.Join(c.BaseDir, normalized)
@@ -81,7 +80,7 @@ func (c *CacheConfig) GetCacheRoot(baseURL string) string {
 // baseURL: https://test.com:8080/aa
 // subDir: "js" 或 "source_map"
 // urlPath: /static/js/app.js
-// 返回: /tmp/ejfkdev/dj/https_test.com:8080_aa/js/static_js_app.js
+// 返回: /tmp/ejfkdev/dj/https_test.com_8080_aa/js/static_js_app.js
 func (c *CacheConfig) GetCachePath(baseURL, subDir, urlPath string) string {
 	root := c.GetCacheRoot(baseURL)
 	normalizedPath := NormalizePathForFile(urlPath)

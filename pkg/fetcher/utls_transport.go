@@ -2,20 +2,55 @@ package fetcher
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/proxy"
 )
+
+// utlsConnWrapper 包装 utls.UConn，暴露 tls.ConnectionState
+// golang.org/x/net/http2.Transport 会检查 ConnectionState() 来验证 ALPN 协商
+type utlsConnWrapper struct {
+	*utls.UConn
+}
+
+func (w *utlsConnWrapper) ConnectionState() tls.ConnectionState {
+	cs := w.UConn.ConnectionState()
+	return tls.ConnectionState{
+		Version:                     cs.Version,
+		HandshakeComplete:           cs.HandshakeComplete,
+		DidResume:                   cs.DidResume,
+		CipherSuite:                 cs.CipherSuite,
+		NegotiatedProtocol:          cs.NegotiatedProtocol,
+		NegotiatedProtocolIsMutual:  cs.NegotiatedProtocolIsMutual,
+		ServerName:                  cs.ServerName,
+		PeerCertificates:            cs.PeerCertificates,
+		VerifiedChains:              cs.VerifiedChains,
+		SignedCertificateTimestamps: cs.SignedCertificateTimestamps,
+		OCSPResponse:                cs.OCSPResponse,
+		TLSUnique:                   cs.TLSUnique,
+	}
+}
 
 // proxyFromEnvironment 从环境变量解析代理 URL
 func proxyFromEnvironment() *url.URL {
-	for _, key := range []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"} {
+	for _, key := range []string{
+		"HTTPS_PROXY", "https_proxy",
+		"HTTP_PROXY", "http_proxy",
+		"ALL_PROXY", "all_proxy",
+	} {
 		if v := os.Getenv(key); v != "" {
+			if !strings.Contains(v, "://") {
+				v = "http://" + v
+			}
 			if u, err := url.Parse(v); err == nil {
 				return u
 			}
@@ -24,15 +59,70 @@ func proxyFromEnvironment() *url.URL {
 	return nil
 }
 
-// newUTLSTransport 创建使用 uTLS 的 http.Transport，模拟 Chrome TLS 指纹
-// 代理由 Transport 自行处理（CONNECT 隧道），DialTLSContext 只负责 TLS 握手
-func newUTLSTransport(proxyURL *url.URL) *http.Transport {
-	// 解析代理：优先显式指定的代理，其次从环境变量读取
-	resolvedProxy := proxyURL
-	if resolvedProxy == nil {
-		resolvedProxy = proxyFromEnvironment()
+// getEnvAny 返回第一个非空的环境变量
+func getEnvAny(keys ...string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
 	}
+	return ""
+}
 
+// shouldBypassProxy 检查 host 是否匹配 NO_PROXY 列表
+func shouldBypassProxy(host, noProxy string) bool {
+	if noProxy == "*" {
+		return true
+	}
+	for _, pattern := range strings.Split(noProxy, ",") {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		if pattern == host {
+			return true
+		}
+		if strings.HasPrefix(pattern, ".") && (strings.HasSuffix(host, pattern) || host == pattern[1:]) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveProxy 按请求解析代理配置，支持 NO_PROXY
+func resolveProxy(proxyURL *url.URL, targetAddr string) *url.URL {
+	if proxyURL != nil {
+		return proxyURL
+	}
+	p := proxyFromEnvironment()
+	if p == nil {
+		return nil
+	}
+	// 环境变量代理检查 NO_PROXY
+	noProxy := getEnvAny("NO_PROXY", "no_proxy")
+	host, _, err := net.SplitHostPort(targetAddr)
+	if err != nil {
+		host = targetAddr
+	}
+	if shouldBypassProxy(host, noProxy) {
+		return nil
+	}
+	return p
+}
+
+// newH2Transport 创建 HTTP/2 传输，使用 uTLS 指纹伪装
+func newH2Transport(proxyURL *url.URL) *http2.Transport {
+	return &http2.Transport{
+		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+			p := resolveProxy(proxyURL, addr)
+			return dialUTLS(ctx, network, addr, p, []string{"h2", "http/1.1"})
+		},
+		AllowHTTP: false,
+	}
+}
+
+// newH1Transport 创建 HTTP/1.1 传输，使用 uTLS 指纹伪装
+func newH1Transport(proxyURL *url.URL) *http.Transport {
 	transport := &http.Transport{
 		MaxIdleConns:        2000,
 		MaxIdleConnsPerHost: 1000,
@@ -40,43 +130,21 @@ func newUTLSTransport(proxyURL *url.URL) *http.Transport {
 		DisableKeepAlives:   false,
 	}
 
-	// 设置代理（Transport 会自行处理 CONNECT 隧道）
-	if resolvedProxy != nil {
-		transport.Proxy = http.ProxyURL(resolvedProxy)
-	} else {
-		transport.Proxy = http.ProxyFromEnvironment
-	}
-
-	// 重写 TLS 拨号，使用 uTLS
-	// Transport 处理完代理 CONNECT 后，在此连接上进行 TLS 握手
 	transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		// Transport 在有代理时会先建立到代理的 TCP 连接，发送 CONNECT，
-		// 然后在此调用中进行 TLS 握手。
-		// 但实际上 Transport 会先调用 DialContext 建立 TCP 连接，
-		// 然后对 HTTPS 请求调用 DialTLSContext 来建立 TLS。
-		// 所以这里的 conn 需要我们自行建立 TCP 连接。
-		//
-		// 注意：当设置了 DialTLSContext 后，Transport 不再使用 DialContext
-		// 来建立 HTTPS 连接，而是直接使用 DialTLSContext。
-		// Transport 会在 DialTLSContext 返回的连接上处理代理 CONNECT（如果需要）。
-		//
-		// 但实际上 Go 的实现是：DialTLSContext 完全接管连接建立，
-		// Transport 不会再做代理 CONNECT。
-		// 所以我们需要在 DialTLSContext 中处理代理。
-
-		return dialUTLS(ctx, network, addr, resolvedProxy, utls.HelloChrome_Auto)
+		p := resolveProxy(proxyURL, addr)
+		return dialUTLS(ctx, network, addr, p, []string{"http/1.1"})
 	}
 
 	return transport
 }
 
 // dialUTLS 建立 uTLS 连接，可选通过代理
-func dialUTLS(ctx context.Context, network, addr string, proxyURL *url.URL, clientHelloID utls.ClientHelloID) (net.Conn, error) {
+func dialUTLS(ctx context.Context, network, addr string, proxyURL *url.URL, alpnProtos []string) (net.Conn, error) {
 	var rawConn net.Conn
 	var err error
 
 	if proxyURL != nil {
-		rawConn, err = dialViaProxy(ctx, proxyURL, addr)
+		rawConn, err = dialProxy(ctx, proxyURL, addr)
 	} else {
 		dialer := &net.Dialer{
 			Timeout:   30 * time.Second,
@@ -94,22 +162,21 @@ func dialUTLS(ctx context.Context, network, addr string, proxyURL *url.URL, clie
 		host = addr
 	}
 
-	spec, err := utls.UTLSIdToSpec(clientHelloID)
+	spec, err := utls.UTLSIdToSpec(utls.HelloChrome_Auto)
 	if err != nil {
 		rawConn.Close()
 		return nil, fmt.Errorf("uTLS spec error: %w", err)
 	}
 
-	// 强制 ALPN 只使用 http/1.1，避免与 Go HTTP/2 transport 不兼容
+	// 替换 ALPN 为指定协议列表
 	spec.Extensions = append([]utls.TLSExtension{}, spec.Extensions...)
-	// 过滤掉 ALPN extension 并替换为只支持 http/1.1 的版本
 	filtered := make([]utls.TLSExtension, 0, len(spec.Extensions))
 	for _, ext := range spec.Extensions {
 		if _, ok := ext.(*utls.ALPNExtension); !ok {
 			filtered = append(filtered, ext)
 		}
 	}
-	filtered = append(filtered, &utls.ALPNExtension{AlpnProtocols: []string{"http/1.1"}})
+	filtered = append(filtered, &utls.ALPNExtension{AlpnProtocols: alpnProtos})
 	spec.Extensions = filtered
 
 	utlsConn := utls.UClient(rawConn, &utls.Config{
@@ -126,11 +193,58 @@ func dialUTLS(ctx context.Context, network, addr string, proxyURL *url.URL, clie
 		return nil, fmt.Errorf("uTLS handshake failed: %w", err)
 	}
 
-	return utlsConn, nil
+	return &utlsConnWrapper{utlsConn}, nil
 }
 
-// dialViaProxy 通过 HTTP 代理的 CONNECT 隧道建立连接
-func dialViaProxy(ctx context.Context, proxyURL *url.URL, targetAddr string) (net.Conn, error) {
+// dialProxy 根据代理 URL scheme 选择拨号方式
+func dialProxy(ctx context.Context, proxyURL *url.URL, targetAddr string) (net.Conn, error) {
+	switch proxyURL.Scheme {
+	case "socks5", "socks5h":
+		return dialViaSOCKS5(ctx, proxyURL, targetAddr)
+	case "https":
+		return dialViaHTTPSProxy(ctx, proxyURL, targetAddr)
+	default:
+		return dialViaHTTPProxy(ctx, proxyURL, targetAddr)
+	}
+}
+
+// dialViaSOCKS5 通过 SOCKS5 代理建立连接
+func dialViaSOCKS5(ctx context.Context, proxyURL *url.URL, targetAddr string) (net.Conn, error) {
+	var auth *proxy.Auth
+	if proxyURL.User != nil {
+		auth = &proxy.Auth{
+			User: proxyURL.User.Username(),
+		}
+		if p, ok := proxyURL.User.Password(); ok {
+			auth.Password = p
+		}
+	}
+
+	forward := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+
+	dialer, err := proxy.SOCKS5("tcp", proxyURL.Host, auth, forward)
+	if err != nil {
+		return nil, fmt.Errorf("create SOCKS5 dialer for %s: %w", proxyURL.Host, err)
+	}
+
+	var conn net.Conn
+	if ctxDialer, ok := dialer.(proxy.ContextDialer); ok {
+		conn, err = ctxDialer.DialContext(ctx, "tcp", targetAddr)
+	} else {
+		conn, err = dialer.Dial("tcp", targetAddr)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("socks5 connect %s via %s: %w", targetAddr, proxyURL.Host, err)
+	}
+
+	return conn, nil
+}
+
+// dialViaHTTPProxy 通过 HTTP CONNECT 隧道建立连接
+func dialViaHTTPProxy(ctx context.Context, proxyURL *url.URL, targetAddr string) (net.Conn, error) {
 	dialer := &net.Dialer{
 		Timeout: 30 * time.Second,
 	}
@@ -140,7 +254,49 @@ func dialViaProxy(ctx context.Context, proxyURL *url.URL, targetAddr string) (ne
 		return nil, fmt.Errorf("connect to proxy %s: %w", proxyURL.Host, err)
 	}
 
-	// 构建 CONNECT 请求
+	if err := sendConnectRequest(proxyConn, ctx, proxyURL, targetAddr); err != nil {
+		proxyConn.Close()
+		return nil, err
+	}
+
+	return proxyConn, nil
+}
+
+// dialViaHTTPSProxy 通过 HTTPS 代理的 CONNECT 隧道建立连接（TLS 到代理 + CONNECT）
+func dialViaHTTPSProxy(ctx context.Context, proxyURL *url.URL, targetAddr string) (net.Conn, error) {
+	dialer := &net.Dialer{
+		Timeout: 30 * time.Second,
+	}
+
+	rawConn, err := dialer.DialContext(ctx, "tcp", proxyURL.Host)
+	if err != nil {
+		return nil, fmt.Errorf("connect to proxy %s: %w", proxyURL.Host, err)
+	}
+
+	tlsConn := tls.Client(rawConn, &tls.Config{
+		ServerName: proxyURL.Hostname(),
+	})
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		rawConn.Close()
+		return nil, fmt.Errorf("TLS handshake with proxy %s: %w", proxyURL.Host, err)
+	}
+
+	if err := sendConnectRequest(tlsConn, ctx, proxyURL, targetAddr); err != nil {
+		tlsConn.Close()
+		return nil, err
+	}
+
+	return tlsConn, nil
+}
+
+// sendConnectRequest 发送 HTTP CONNECT 请求并读取响应
+func sendConnectRequest(conn net.Conn, ctx context.Context, proxyURL *url.URL, targetAddr string) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		conn.SetReadDeadline(deadline)
+	} else {
+		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	}
+
 	connectReq := &http.Request{
 		Method: http.MethodConnect,
 		URL:    &url.URL{Host: targetAddr},
@@ -148,7 +304,6 @@ func dialViaProxy(ctx context.Context, proxyURL *url.URL, targetAddr string) (ne
 		Header: make(http.Header),
 	}
 
-	// 代理认证
 	if proxyURL.User != nil {
 		username := proxyURL.User.Username()
 		password, _ := proxyURL.User.Password()
@@ -157,39 +312,40 @@ func dialViaProxy(ctx context.Context, proxyURL *url.URL, targetAddr string) (ne
 		}
 	}
 
-	if err := connectReq.Write(proxyConn); err != nil {
-		proxyConn.Close()
-		return nil, fmt.Errorf("write CONNECT to proxy: %w", err)
+	if err := connectReq.Write(conn); err != nil {
+		return fmt.Errorf("write CONNECT to proxy: %w", err)
 	}
 
 	// 逐字节读取 CONNECT 响应，避免 bufio 缓冲 TLS 数据
-	// CONNECT 响应格式: HTTP/1.1 200 Connection Established\r\n\r\n
 	buf := make([]byte, 1)
 	var respBuf []byte
-	for i := 0; i < 4096; i++ {
-		_, err := proxyConn.Read(buf)
+	for range 4096 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		_, err := conn.Read(buf)
 		if err != nil {
-			proxyConn.Close()
-			return nil, fmt.Errorf("read CONNECT response: %w", err)
+			return fmt.Errorf("read CONNECT response: %w", err)
 		}
 		respBuf = append(respBuf, buf[0])
-		// 检查是否读到响应结尾（\r\n\r\n）
 		if len(respBuf) >= 4 && string(respBuf[len(respBuf)-4:]) == "\r\n\r\n" {
 			break
 		}
 	}
 
-	// 解析状态码
+	conn.SetReadDeadline(time.Time{})
+
 	respStr := string(respBuf)
 	if len(respStr) < 12 {
-		proxyConn.Close()
-		return nil, fmt.Errorf("malformed CONNECT response: %s", respStr)
+		return fmt.Errorf("malformed CONNECT response: %s", respStr)
 	}
 	statusCode := respStr[9:12]
 	if statusCode != "200" {
-		proxyConn.Close()
-		return nil, fmt.Errorf("proxy CONNECT failed: %s", respStr)
+		return fmt.Errorf("proxy CONNECT failed: %s", respStr)
 	}
 
-	return proxyConn, nil
+	return nil
 }
