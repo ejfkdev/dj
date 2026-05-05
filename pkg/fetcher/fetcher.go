@@ -6,9 +6,11 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
-	"strings"
 	"time"
+
+	"github.com/andybalholm/brotli"
 )
 
 const (
@@ -18,6 +20,15 @@ const (
 
 // ErrBodyTooLarge 响应体超过限制
 var ErrBodyTooLarge = errors.New("response body exceeds max size limit")
+
+// DefaultUserAgent 默认 User-Agent（模拟 Chrome，不暴露工具标识）
+const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+
+// FetcherConfig Fetcher 配置
+type FetcherConfig struct {
+	Proxy   string // HTTP 代理 URL
+	UseUTLS bool   // 启用 uTLS TLS 指纹伪装
+}
 
 // FetchResult 包含内容和状态码
 type FetchResult struct {
@@ -31,43 +42,44 @@ type FetchResult struct {
 type Fetcher struct {
 	client    *http.Client
 	userAgent string
-}
-
-// DefaultUserAgentTemplate 默认 User-Agent 模板
-// 使用 BuildUserAgent(version) 生成完整 UA
-const DefaultUserAgentTemplate = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 dj/{version} (+https://github.com/ejfkdev/dj)"
-
-// BuildUserAgent 生成完整的 User-Agent 字符串
-func BuildUserAgent(version string) string {
-	if version == "" {
-		version = "dev"
-	}
-	return strings.ReplaceAll(DefaultUserAgentTemplate, "{version}", version)
+	cookieJar http.CookieJar
 }
 
 // NewFetcher 创建下载器（使用默认配置）
 func NewFetcher() *Fetcher {
-	return NewFetcherWithConfig("")
+	f, _ := NewFetcherWithConfig(FetcherConfig{UseUTLS: true})
+	return f
 }
 
-// NewFetcherWithConfig 创建下载器，支持自定义 User-Agent 和代理
-// userAgent 为空使用默认 UA，proxy 为空使用环境变量代理
-func NewFetcherWithConfig(proxy string) *Fetcher {
-	transport := &http.Transport{
-		MaxIdleConns:        2000,
-		MaxIdleConnsPerHost: 1000,
-		IdleConnTimeout:     90 * time.Second,
-		DisableKeepAlives:   false,
+// NewFetcherWithConfig 创建下载器，支持 uTLS 指纹伪装、Cookie Jar 和代理
+func NewFetcherWithConfig(cfg FetcherConfig) (*Fetcher, error) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
 	}
 
-	// 设置代理
-	if proxy != "" {
-		proxyURL, err := url.Parse(proxy)
-		if err == nil {
-			transport.Proxy = http.ProxyURL(proxyURL)
-		}
+	var transport http.RoundTripper
+
+	var proxyURL *url.URL
+	if cfg.Proxy != "" {
+		proxyURL, _ = url.Parse(cfg.Proxy)
+	}
+
+	if cfg.UseUTLS {
+		transport = newUTLSTransport(proxyURL)
 	} else {
-		transport.Proxy = http.ProxyFromEnvironment
+		stdTransport := &http.Transport{
+			MaxIdleConns:        2000,
+			MaxIdleConnsPerHost: 1000,
+			IdleConnTimeout:     90 * time.Second,
+			DisableKeepAlives:   false,
+		}
+		if proxyURL != nil {
+			stdTransport.Proxy = http.ProxyURL(proxyURL)
+		} else {
+			stdTransport.Proxy = http.ProxyFromEnvironment
+		}
+		transport = stdTransport
 	}
 
 	return &Fetcher{
@@ -77,9 +89,11 @@ func NewFetcherWithConfig(proxy string) *Fetcher {
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return nil // 直接跟随重定向
 			},
+			Jar: jar,
 		},
-		userAgent: BuildUserAgent("dev"),
-	}
+		userAgent: DefaultUserAgent,
+		cookieJar: jar,
+	}, nil
 }
 
 // SetUserAgent 设置自定义 User-Agent
@@ -89,9 +103,19 @@ func (f *Fetcher) SetUserAgent(ua string) {
 	}
 }
 
+// SetCookies 向 Fetcher 的 Cookie Jar 中注入 cookie
+func (f *Fetcher) SetCookies(targetURL string, cookies []*http.Cookie) error {
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		return err
+	}
+	f.cookieJar.SetCookies(u, cookies)
+	return nil
+}
+
 // newRequest 创建一个带默认请求头的 GET 请求
-func (f *Fetcher) newRequest(url string) (*http.Request, error) {
-	req, err := http.NewRequest("GET", url, nil)
+func (f *Fetcher) newRequest(rawURL string) (*http.Request, error) {
+	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +126,7 @@ func (f *Fetcher) newRequest(url string) (*http.Request, error) {
 
 // limitedReader 限制读取大小
 type limitedReader struct {
-	r    io.Reader
+	r      io.Reader
 	remain int64
 }
 
@@ -120,8 +144,8 @@ func (lr *limitedReader) Read(p []byte) (int, error) {
 }
 
 // Fetch 获取 URL 内容
-func (f *Fetcher) Fetch(url string) ([]byte, error) {
-	req, err := f.newRequest(url)
+func (f *Fetcher) Fetch(rawURL string) ([]byte, error) {
+	req, err := f.newRequest(rawURL)
 	if err != nil {
 		return nil, err
 	}
@@ -156,8 +180,8 @@ func (f *Fetcher) Fetch(url string) ([]byte, error) {
 }
 
 // FetchWithStatus 获取 URL 内容和状态码
-func (f *Fetcher) FetchWithStatus(url string) (*FetchResult, error) {
-	req, err := f.newRequest(url)
+func (f *Fetcher) FetchWithStatus(rawURL string) (*FetchResult, error) {
+	req, err := f.newRequest(rawURL)
 	if err != nil {
 		return nil, err
 	}
@@ -192,8 +216,8 @@ func (f *Fetcher) FetchWithStatus(url string) (*FetchResult, error) {
 }
 
 // FetchWithStatusHead 使用 HEAD 请求探测 URL 是否存在
-func (f *Fetcher) FetchWithStatusHead(url string) (*FetchResult, error) {
-	resp, err := f.client.Head(url)
+func (f *Fetcher) FetchWithStatusHead(rawURL string) (*FetchResult, error) {
+	resp, err := f.client.Head(rawURL)
 	if err != nil {
 		return nil, err
 	}
@@ -222,9 +246,7 @@ func decompressResponse(resp *http.Response) (io.Reader, error) {
 		}
 		return zr, nil
 	case "br":
-		// brotli - Go 1.23+ has built-in brotli support via compress/brotli
-		// 如果不支持 brotli，使用 identity (不压缩)
-		return resp.Body, nil
+		return brotli.NewReader(resp.Body), nil
 	default:
 		return resp.Body, nil
 	}

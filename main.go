@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ func main() {
 	var outputFormat = extractor.FormatText
 	var userAgent string
 	var proxy string
+	var cookie string
 	var url string
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
@@ -64,6 +66,8 @@ func main() {
 			userAgent = strings.TrimPrefix(arg, "--useragent=")
 		} else if strings.HasPrefix(arg, "--proxy=") {
 			proxy = strings.TrimPrefix(arg, "--proxy=")
+		} else if strings.HasPrefix(arg, "--cookie=") {
+			cookie = strings.TrimPrefix(arg, "--cookie=")
 		} else if arg == "--help" || arg == "-h" {
 			showHelp = true
 		} else if !strings.HasPrefix(arg, "-") {
@@ -74,12 +78,13 @@ func main() {
 	if showHelp {
 		fmt.Printf("dj - JS/SourceMap Extractor %s\n", version)
 		fmt.Printf("Extract JS URLs and source maps from websites\n\n")
-		fmt.Printf("Usage: dj [--debug] [--cache[=false]] [-f format] [--useragent=<UA>] [--proxy=<proxy>] <url>\n")
+		fmt.Printf("Usage: dj [--debug] [--cache[=false]] [-f format] [--useragent=<UA>] [--proxy=<proxy>] [--cookie=<cookies>] <url>\n")
 		fmt.Printf("  --debug: enable debug output\n")
 		fmt.Printf("  -f: output format (text, json, md), default: text\n")
 		fmt.Printf("      --cache is enabled by default, use --cache=false to disable\n")
 		fmt.Printf("  --useragent: custom User-Agent string for HTTP requests\n")
 		fmt.Printf("  --proxy: HTTP proxy URL (e.g., http://127.0.0.1:7890)\n")
+		fmt.Printf("  --cookie: cookies for bypassing Cloudflare (e.g., \"cf_clearance=xxx; key=val\")\n")
 		fmt.Printf("Cache path: %s\n", fetcher.GetTempDir())
 		os.Exit(0)
 	}
@@ -87,12 +92,13 @@ func main() {
 	if url == "" {
 		fmt.Printf("dj - JS/SourceMap Extractor %s\n", version)
 		fmt.Printf("Extract JS URLs and source maps from websites\n\n")
-		fmt.Printf("Usage: dj [--debug] [--cache[=false]] [-f format] [--useragent=<UA>] [--proxy=<proxy>] <url>\n")
+		fmt.Printf("Usage: dj [--debug] [--cache[=false]] [-f format] [--useragent=<UA>] [--proxy=<proxy>] [--cookie=<cookies>] <url>\n")
 		fmt.Printf("  --debug: enable debug output\n")
 		fmt.Printf("  -f: output format (text, json, md), default: text\n")
 		fmt.Printf("      --cache is enabled by default, use --cache=false to disable\n")
 		fmt.Printf("  --useragent: custom User-Agent string for HTTP requests\n")
 		fmt.Printf("  --proxy: HTTP proxy URL (e.g., http://127.0.0.1:7890)\n")
+		fmt.Printf("  --cookie: cookies for bypassing Cloudflare (e.g., \"cf_clearance=xxx; key=val\")\n")
 		fmt.Printf("Cache path: %s\n", fetcher.GetTempDir())
 		os.Exit(1)
 	}
@@ -124,12 +130,18 @@ func main() {
 	pipeline.Debug = debug
 
 	// 设置 Fetcher 配置（代理和 User-Agent）
-	// 如果 userAgent 为空，使用带版本号的默认 UA
 	ua := userAgent
 	if ua == "" {
-		ua = fetcher.BuildUserAgent(version)
+		ua = fetcher.DefaultUserAgent
 	}
 	pipeline.SetFetcherConfig(proxy, ua)
+
+	// 注入 cookie（用于绕过 Cloudflare 等防护）
+	if cookie != "" {
+		if err := pipeline.SetBrowserCookies(url, parseCookies(cookie)); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to set cookies: %v\n", err)
+		}
+	}
 
 	// 设置缓存配置
 	if enableCache {
@@ -175,4 +187,23 @@ func main() {
 		result := pipeline.GetOutputResult()
 		fmt.Print(extractor.FormatOutput(outputFormat, result))
 	}
+}
+
+// parseCookies 解析 cookie 字符串为 http.Cookie 切片
+// 格式: "name1=value1; name2=value2"
+func parseCookies(cookieStr string) []*http.Cookie {
+	var cookies []*http.Cookie
+	for _, part := range strings.Split(cookieStr, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if idx := strings.Index(part, "="); idx > 0 {
+			cookies = append(cookies, &http.Cookie{
+				Name:  strings.TrimSpace(part[:idx]),
+				Value: strings.TrimSpace(part[idx+1:]),
+			})
+		}
+	}
+	return cookies
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -94,11 +95,26 @@ func (p *Pipeline) SetCacheConfig(cfg *fetcher.CacheConfig) {
 
 // SetFetcherConfig 设置 Fetcher 配置（代理和 User-Agent）
 func (p *Pipeline) SetFetcherConfig(proxy, userAgent string) {
-	f := fetcher.NewFetcherWithConfig(proxy)
+	f, err := fetcher.NewFetcherWithConfig(fetcher.FetcherConfig{
+		Proxy:   proxy,
+		UseUTLS: true,
+	})
+	if err != nil {
+		// 降级为不使用 uTLS
+		f, _ = fetcher.NewFetcherWithConfig(fetcher.FetcherConfig{
+			Proxy:   proxy,
+			UseUTLS: false,
+		})
+	}
 	if userAgent != "" {
 		f.SetUserAgent(userAgent)
 	}
 	p.fetcher = f
+}
+
+// SetBrowserCookies 注入浏览器 cookie 到 Fetcher
+func (p *Pipeline) SetBrowserCookies(targetURL string, cookies []*http.Cookie) error {
+	return p.fetcher.SetCookies(targetURL, cookies)
 }
 
 // SetBaseURL 设置起始 URL
