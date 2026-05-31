@@ -9,9 +9,10 @@ import (
 type ContentType string
 
 const (
-	ContentTypeHTML ContentType = "html"
-	ContentTypeJS   ContentType = "js"
-	ContentTypeJSON ContentType = "json"
+	ContentTypeHTML   ContentType = "html"
+	ContentTypeJS     ContentType = "js"
+	ContentTypeJSON   ContentType = "json"
+	ContentTypeFlight ContentType = "flight" // Next.js RSC Flight 数据
 )
 
 // AnalyzeInput 插件分析的上下文输入
@@ -33,6 +34,12 @@ type InlineScript struct {
 	SourceURL string // 来源 HTML 的 URL
 	Index     int    // 脚本在 HTML 中的顺序索引
 	Content   []byte // 脚本内容
+}
+
+// RSCProbe 需要发送 RSC 请求的探测目标
+type RSCProbe struct {
+	URL     string            // 要发送 RSC 请求的 URL
+	Headers map[string]string // 请求头（如 RSC: 1）
 }
 
 // Result 插件分析的返回结果
@@ -57,6 +64,9 @@ type Result struct {
 
 	// InlineScripts 行内脚本内容，需要主流程分析
 	InlineScripts []InlineScript
+
+	// RSCProbes 需要发送 RSC 请求的探测目标（Next.js Flight 数据）
+	RSCProbes []RSCProbe
 }
 
 // DiscoveredJS 发现的 JS 详细信息

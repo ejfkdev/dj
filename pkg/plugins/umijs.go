@@ -242,4 +242,3 @@ func containsProbeTarget(targets []extractor.DiscoveredJS, url string) bool {
 	}
 	return false
 }
-

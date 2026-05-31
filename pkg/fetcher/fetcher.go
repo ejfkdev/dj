@@ -283,6 +283,43 @@ func (f *Fetcher) FetchWithStatus(rawURL string) (*FetchResult, error) {
 	}, nil
 }
 
+// FetchWithHeaders 使用自定义请求头获取 URL 内容
+func (f *Fetcher) FetchWithHeaders(rawURL string, headers map[string]string) (*FetchResult, error) {
+	req, err := f.newRequest(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := decompressResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+	if rc, ok := body.(io.Closer); ok {
+		defer rc.Close()
+	}
+
+	limited := &limitedReader{r: body, remain: MaxBodySize}
+	content, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+
+	return &FetchResult{
+		Content:     content,
+		StatusCode:  resp.StatusCode,
+		ContentType: resp.Header.Get("Content-Type"),
+		Headers:     resp.Header,
+	}, nil
+}
+
 // FetchWithStatusHead 使用 HEAD 请求探测 URL 是否存在
 func (f *Fetcher) FetchWithStatusHead(rawURL string) (*FetchResult, error) {
 	resp, err := f.client.Head(rawURL)

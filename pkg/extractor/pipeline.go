@@ -43,7 +43,7 @@ type Pipeline struct {
 
 	// 缓存配置
 	cacheConfig *fetcher.CacheConfig
-	baseURL    string // 起始 URL，用于缓存路径计算
+	baseURL     string // 起始 URL，用于缓存路径计算
 
 	// 调试模式
 	Debug bool
@@ -62,8 +62,8 @@ type Pipeline struct {
 	// 发现 JS URL 的通知 channel
 	foundCh      chan string
 	foundChMu    sync.Mutex
-	foundChSeen  map[string]bool  // 去重
-	foundChClose sync.Once        // 安全关闭 channel
+	foundChSeen  map[string]bool // 去重
+	foundChClose sync.Once       // 安全关闭 channel
 
 	// 收集的 JS URL（用于格式化输出）
 	jsURLsMu sync.Mutex
@@ -78,13 +78,13 @@ type Pipeline struct {
 func NewPipeline(reg *PluginRegistry) *Pipeline {
 	return &Pipeline{
 		knowledge:   NewKnowledgeBase(),
-		registry:   reg,
-		fetcher:    fetcher.NewFetcher(),
-		tasks:      make([]string, 0),
-		fragments:  make([]DiscoveredJS, 0),
-		foundCh:    make(chan string, 100),
+		registry:    reg,
+		fetcher:     fetcher.NewFetcher(),
+		tasks:       make([]string, 0),
+		fragments:   make([]DiscoveredJS, 0),
+		foundCh:     make(chan string, 100),
 		foundChSeen: make(map[string]bool),
-		urlContext: make(map[string]DiscoveredJS),
+		urlContext:  make(map[string]DiscoveredJS),
 	}
 }
 
@@ -418,11 +418,11 @@ func (p *Pipeline) saveSiteMetadata() {
 			localPath = p.cacheConfig.GetCachePath(p.baseURL, "js", path)
 		}
 		jsMetadataList = append(jsMetadataList, JSMetadata{
-			URL:         js.URL,
-			LocalPath:   localPath,
-			SourceURL:   js.FromURL,
-			IsInline:    js.IsInline,
-			FromPlugin:  js.FromPlugin,
+			URL:          js.URL,
+			LocalPath:    localPath,
+			SourceURL:    js.FromURL,
+			IsInline:     js.IsInline,
+			FromPlugin:   js.FromPlugin,
 			DiscoveredAt: time.Now().Unix(),
 		})
 	}
@@ -710,9 +710,9 @@ func (p *Pipeline) processResults(ctx context.Context, results []*Result, source
 	}
 	for _, r := range results {
 		// Debug: 打印插件返回结果
-		if p.Debug && (len(r.URLs) > 0 || len(r.ProbeTargets) > 0 || len(r.InlineScripts) > 0) {
-			p.debugLog("processResults: source=%s, URLs=%d, ProbeTargets=%d, InlineScripts=%d, from=%s",
-				sourceURL, len(r.URLs), len(r.ProbeTargets), len(r.InlineScripts), r.FromPlugin)
+		if p.Debug && (len(r.URLs) > 0 || len(r.ProbeTargets) > 0 || len(r.InlineScripts) > 0 || len(r.RSCProbes) > 0) {
+			p.debugLog("processResults: source=%s, URLs=%d, ProbeTargets=%d, InlineScripts=%d, RSCProbes=%d, from=%s",
+				sourceURL, len(r.URLs), len(r.ProbeTargets), len(r.InlineScripts), len(r.RSCProbes), r.FromPlugin)
 			if len(r.ProbeTargets) > 0 {
 				p.debugLog("processResults: first ProbeTarget: %s", r.ProbeTargets[0].URL)
 			}
@@ -857,9 +857,55 @@ func (p *Pipeline) processResults(ctx context.Context, results []*Result, source
 			if p.Debug {
 				p.debugLog("processResults: inline script %d returned %d results", inlineScript.Index, len(inlineResults))
 			}
-
 			// 处理内联脚本的 URLs 和 ProbeTargets，但不再递归处理其 InlineScripts
 			p.processInlineResults(inlineResults, baseURL)
+		}
+
+		// 处理 RSC 探测请求（Next.js Flight 数据）
+		for _, probe := range r.RSCProbes {
+			rscKey := "rsc:" + probe.URL
+			if p.knowledge.IsSeenURL(rscKey) {
+				continue
+			}
+			p.knowledge.MarkSeenURL(rscKey)
+
+			if p.Debug {
+				p.debugLog("processResults: RSC probe %s", probe.URL)
+			}
+
+			fetchResult, err := p.fetcher.FetchWithHeaders(probe.URL, probe.Headers)
+			if err != nil {
+				if p.Debug {
+					p.debugLog("processResults: RSC probe error: url=%s, err=%v", probe.URL, err)
+				}
+				continue
+			}
+			if fetchResult.StatusCode < 200 || fetchResult.StatusCode >= 300 {
+				continue
+			}
+
+			// 检测内容类型，跳过纯 HTML 响应（非 RSC 数据）
+			checkLen := len(fetchResult.Content)
+			if checkLen > 200 {
+				checkLen = 200
+			}
+			contentType := strings.ToLower(fetchResult.ContentType)
+			if strings.Contains(contentType, "text/html") && !strings.Contains(string(fetchResult.Content[:checkLen]), "I[") {
+				continue
+			}
+
+			flightInput := &AnalyzeInput{
+				SourceURL:   probe.URL,
+				ContentType: ContentTypeFlight,
+				Content:     fetchResult.Content,
+				Headers:     fetchResult.Headers,
+			}
+
+			flightResults := p.dispatchPlugins(ctx, flightInput)
+			if p.Debug {
+				p.debugLog("processResults: RSC probe %s returned %d results", probe.URL, len(flightResults))
+			}
+			p.processResults(ctx, flightResults, probe.URL)
 		}
 	}
 }
@@ -1144,7 +1190,6 @@ func isLikelyStaticResource(urlStr string) bool {
 		strings.HasSuffix(lowerURL, ".jpg")
 }
 
-
 // detectContentTypeFromHeader 优先从 HTTP 响应头检测 Content-Type
 func (p *Pipeline) detectContentTypeFromHeader(contentTypeHeader string, content []byte) ContentType {
 	// 解析 Content-Type header
@@ -1221,7 +1266,7 @@ func (p *Pipeline) GetOutputResult() *OutputResult {
 		host := extractHost(p.baseURL)
 		result.CacheBase = filepath.Join(p.cacheConfig.BaseDir, "https_"+host)
 		result.CacheDirs = &CacheDirs{
-			JS: filepath.Join(result.CacheBase, "js"),
+			JS:   filepath.Join(result.CacheBase, "js"),
 			HTML: filepath.Join(result.CacheBase, "html", "web.html"),
 		}
 

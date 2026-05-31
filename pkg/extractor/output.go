@@ -17,10 +17,10 @@ const (
 
 // OutputResult 输出结果结构
 type OutputResult struct {
-	Summary   Summary        `json:"summary"`
-	JSURLs   []string       `json:"jsURLs"`
-	CacheBase string        `json:"cacheBase,omitempty"`
-	CacheDirs *CacheDirs    `json:"cacheDirs,omitempty"`
+	Summary   Summary    `json:"summary"`
+	JSURLs    []string   `json:"jsURLs"`
+	CacheBase string     `json:"cacheBase,omitempty"`
+	CacheDirs *CacheDirs `json:"cacheDirs,omitempty"`
 }
 
 // Summary 统计摘要

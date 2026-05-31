@@ -88,8 +88,8 @@ func (p *URLPatternPlugin) Analyze(ctx context.Context, input *extractor.Analyze
 		seenJS[jsPath] = true
 
 		result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-			URL:     jsPath,
-			FromURL: input.SourceURL,
+			URL:      jsPath,
+			FromURL:  input.SourceURL,
 			IsInline: false,
 		})
 	}

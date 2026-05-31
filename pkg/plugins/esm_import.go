@@ -52,14 +52,14 @@ func (p *ESMImportPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeI
 		absoluteURL = extractor.NormalizeURL(absoluteURL)
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: input.SourceURL,
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		} else {
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     fragment,
-				FromURL: input.SourceURL,
+				URL:      fragment,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}
@@ -78,14 +78,14 @@ func (p *ESMImportPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeI
 		absoluteURL = extractor.NormalizeURL(absoluteURL)
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: input.SourceURL,
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		} else {
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     fragment,
-				FromURL: input.SourceURL,
+				URL:      fragment,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}

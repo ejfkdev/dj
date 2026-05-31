@@ -168,10 +168,10 @@ func (p *ModuleFederationManifestPlugin) constructManifestURL(sourceURL, manifes
 
 	// 常见的 CDN 域名到源域名的映射
 	cdnToOrigin := map[string]string{
-		"sf3-cn.feishucdn.com":   "https://www.feishu.cn",
+		"sf3-cn.feishucdn.com":        "https://www.feishu.cn",
 		"sf1-scmcdn-cn.feishucdn.com": "https://www.feishu.cn",
-		"lf3-cn.feishucdn.com":    "https://www.feishu.cn",
-		"lf1-cdn.feishucdn.com":   "https://www.feishu.cn",
+		"lf3-cn.feishucdn.com":        "https://www.feishu.cn",
+		"lf1-cdn.feishucdn.com":       "https://www.feishu.cn",
 	}
 
 	if origin, ok := cdnToOrigin[sourceDomain]; ok {
@@ -184,14 +184,14 @@ func (p *ModuleFederationManifestPlugin) constructManifestURL(sourceURL, manifes
 
 // VmokManifest JSON 格式
 type VmokManifest struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	MetaData  struct {
-		Name       string `json:"name"`
-		Type       string `json:"type"`
-		BuildInfo  struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	MetaData struct {
+		Name      string `json:"name"`
+		Type      string `json:"type"`
+		BuildInfo struct {
 			BuildVersion string `json:"buildVersion"`
-			BuildName   string `json:"buildName"`
+			BuildName    string `json:"buildName"`
 		} `json:"buildInfo"`
 		RemoteEntry struct {
 			Name string `json:"name"`
@@ -202,12 +202,12 @@ type VmokManifest struct {
 			Name string `json:"Name"`
 			Path string `json:"path"`
 		} `json:"types"`
-		GlobalName   string `json:"globalName"`
-		PluginVersion string `json:"pluginVersion"`
-		PublicPath   string `json:"publicPath"`
-		Region       map[string]string `json:"region"`
+		GlobalName    string            `json:"globalName"`
+		PluginVersion string            `json:"pluginVersion"`
+		PublicPath    string            `json:"publicPath"`
+		Region        map[string]string `json:"region"`
 	} `json:"metaData"`
-	Shared   []struct {
+	Shared []struct {
 		ID      string `json:"id"`
 		Name    string `json:"name"`
 		Version string `json:"version"`
@@ -222,8 +222,8 @@ type VmokManifest struct {
 			} `json:"css"`
 		} `json:"assets"`
 	} `json:"shared"`
-	Remotes  []interface{} `json:"remotes"`
-	Exposes  []struct {
+	Remotes []interface{} `json:"remotes"`
+	Exposes []struct {
 		ID     string `json:"id"`
 		Name   string `json:"name"`
 		Assets struct {
@@ -243,9 +243,9 @@ type VmokManifest struct {
 
 // ManifestResult 包含解析后的 manifest 信息
 type ManifestResult struct {
-	Chunks    []string // chunk 相对路径列表
-	CDNBase   string   // CDN 基础 URL
-	PublicPath string  // publicPath 路径
+	Chunks     []string // chunk 相对路径列表
+	CDNBase    string   // CDN 基础 URL
+	PublicPath string   // publicPath 路径
 }
 
 // ParseVmokManifest 解析 vmok manifest JSON
@@ -296,8 +296,8 @@ func ParseVmokManifest(jsonContent []byte) (*ManifestResult, error) {
 	}
 
 	return &ManifestResult{
-		Chunks:    uniqueChunks,
-		CDNBase:   cdnBase,
+		Chunks:     uniqueChunks,
+		CDNBase:    cdnBase,
 		PublicPath: publicPath,
 	}, nil
 }

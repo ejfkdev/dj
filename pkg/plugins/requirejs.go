@@ -73,14 +73,14 @@ func (p *RequireJSPlugin) analyzeHTML(input *extractor.AnalyzeInput, result *ext
 		absoluteURL = extractor.NormalizeURL(absoluteURL)
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: input.SourceURL,
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		} else {
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     url,
-				FromURL: input.SourceURL,
+				URL:      url,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}
@@ -100,14 +100,14 @@ func (p *RequireJSPlugin) analyzeHTML(input *extractor.AnalyzeInput, result *ext
 		absoluteURL = extractor.NormalizeURL(absoluteURL)
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: input.SourceURL,
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		} else {
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     path,
-				FromURL: input.SourceURL,
+				URL:      path,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}
@@ -151,8 +151,8 @@ func (p *RequireJSPlugin) extractDeps(content string, sourceURL string, result *
 		// 跳过已经完整的 URL
 		if strings.HasPrefix(dep, "http://") || strings.HasPrefix(dep, "https://") {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     dep,
-				FromURL: sourceURL,
+				URL:      dep,
+				FromURL:  sourceURL,
 				IsInline: false,
 			})
 			continue
@@ -166,14 +166,14 @@ func (p *RequireJSPlugin) extractDeps(content string, sourceURL string, result *
 		absoluteURL = extractor.NormalizeURL(absoluteURL)
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: sourceURL,
+				URL:      absoluteURL,
+				FromURL:  sourceURL,
 				IsInline: false,
 			})
 		} else {
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     path,
-				FromURL: sourceURL,
+				URL:      path,
+				FromURL:  sourceURL,
 				IsInline: false,
 			})
 		}

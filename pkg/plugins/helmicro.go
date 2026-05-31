@@ -11,11 +11,11 @@ import (
 
 // HelMicroPlugin 提取 Hel-Micro metadata JSON 并解析其中的组件
 type HelMicroPlugin struct {
-	metadataRe         *regexp.Regexp
-	metadataConcatRe  *regexp.Regexp
-	componentPathRe    *regexp.Regexp
-	cdnPrefixRe        *regexp.Regexp
-	cdnFallbackRe      *regexp.Regexp
+	metadataRe       *regexp.Regexp
+	metadataConcatRe *regexp.Regexp
+	componentPathRe  *regexp.Regexp
+	cdnPrefixRe      *regexp.Regexp
+	cdnFallbackRe    *regexp.Regexp
 }
 
 // HelComponent Hel-Micro 组件配置
@@ -122,14 +122,14 @@ func (p *HelMicroPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeIn
 			absoluteURL = extractor.NormalizeURL(absoluteURL)
 			if extractor.IsAbsoluteURL(absoluteURL) {
 				result.URLs = append(result.URLs, extractor.DiscoveredJS{
-					URL:     absoluteURL,
-					FromURL: input.SourceURL,
+					URL:      absoluteURL,
+					FromURL:  input.SourceURL,
 					IsInline: false,
 				})
 			} else {
 				result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-					URL:     path,
-					FromURL: input.SourceURL,
+					URL:      path,
+					FromURL:  input.SourceURL,
 					IsInline: false,
 				})
 			}
@@ -149,8 +149,8 @@ func (p *HelMicroPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeIn
 
 			// 添加为路径片段，让探测机制与已知域名组合
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     path,
-				FromURL: input.SourceURL,
+				URL:      path,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}
@@ -165,14 +165,14 @@ func (p *HelMicroPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeIn
 			absoluteURL = extractor.NormalizeURL(absoluteURL)
 			if extractor.IsAbsoluteURL(absoluteURL) {
 				result.URLs = append(result.URLs, extractor.DiscoveredJS{
-					URL:     absoluteURL,
-					FromURL: input.SourceURL,
+					URL:      absoluteURL,
+					FromURL:  input.SourceURL,
 					IsInline: false,
 				})
 			} else {
 				result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-					URL:     path,
-					FromURL: input.SourceURL,
+					URL:      path,
+					FromURL:  input.SourceURL,
 					IsInline: false,
 				})
 			}
@@ -206,8 +206,8 @@ func (p *HelMicroPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeIn
 		if strings.Contains(content, "hel-micro") || strings.Contains(content, "helMicro") || strings.Contains(content, "components/docs/metadata") {
 			// 添加标准 metadata 路径片段，让探测机制与已知域名组合
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     "/components/docs/metadata.v1.json",
-				FromURL: input.SourceURL,
+				URL:      "/components/docs/metadata.v1.json",
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}
@@ -240,8 +240,8 @@ func (p *HelMicroPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeIn
 			// 提取 url 字段
 			if url, ok := comp["url"].(string); ok && url != "" {
 				result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-					URL:     url,
-					FromURL: input.SourceURL,
+					URL:      url,
+					FromURL:  input.SourceURL,
 					IsInline: false,
 				})
 			}
@@ -251,8 +251,8 @@ func (p *HelMicroPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeIn
 				for _, chunk := range chunks {
 					if chunkStr, ok := chunk.(string); ok {
 						result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-							URL:     chunkStr,
-							FromURL: input.SourceURL,
+							URL:      chunkStr,
+							FromURL:  input.SourceURL,
 							IsInline: false,
 						})
 					}

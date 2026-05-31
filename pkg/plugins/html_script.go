@@ -58,14 +58,14 @@ func (p *HTMLScriptPlugin) Analyze(ctx context.Context, input *extractor.Analyze
 
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: input.SourceURL,
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		} else {
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     src,
-				FromURL: input.SourceURL,
+				URL:      src,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}
@@ -81,8 +81,8 @@ func (p *HTMLScriptPlugin) Analyze(ctx context.Context, input *extractor.Analyze
 		absoluteURL = extractor.NormalizeURL(absoluteURL)
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: input.SourceURL,
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}
@@ -98,8 +98,8 @@ func (p *HTMLScriptPlugin) Analyze(ctx context.Context, input *extractor.Analyze
 		absoluteURL = extractor.NormalizeURL(absoluteURL)
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: input.SourceURL,
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}

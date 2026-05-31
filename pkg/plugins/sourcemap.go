@@ -48,8 +48,8 @@ func (p *SourceMapPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeI
 			smURL := p.resolveURL(input.SourceURL, strings.TrimSpace(xSourceMap))
 			if smURL != "" {
 				result.URLs = append(result.URLs, extractor.DiscoveredJS{
-					URL:     smURL,
-					FromURL: input.SourceURL,
+					URL:      smURL,
+					FromURL:  input.SourceURL,
 					IsInline: false,
 				})
 			}
@@ -58,8 +58,8 @@ func (p *SourceMapPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeI
 			smURL := p.resolveURL(input.SourceURL, strings.TrimSpace(sourceMap))
 			if smURL != "" {
 				result.URLs = append(result.URLs, extractor.DiscoveredJS{
-					URL:     smURL,
-					FromURL: input.SourceURL,
+					URL:      smURL,
+					FromURL:  input.SourceURL,
 					IsInline: false,
 				})
 			}
@@ -93,8 +93,8 @@ func (p *SourceMapPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeI
 	if smURL != "" {
 		foundSourceMap = true
 		result.URLs = append(result.URLs, extractor.DiscoveredJS{
-			URL:     smURL,
-			FromURL: input.SourceURL,
+			URL:      smURL,
+			FromURL:  input.SourceURL,
 			IsInline: false,
 		})
 	}
@@ -148,4 +148,3 @@ func (p *SourceMapPlugin) resolveURL(baseURL, mapURL string) string {
 	// 如果 baseURL 没有路径，直接附加
 	return baseURL + "/" + mapURL
 }
-

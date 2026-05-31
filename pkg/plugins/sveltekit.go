@@ -10,7 +10,7 @@ import (
 
 // SvelteKitPlugin 提取 SvelteKit 相关资源
 type SvelteKitPlugin struct {
-	nodesRe *regexp.Regexp
+	nodesRe  *regexp.Regexp
 	chunksRe *regexp.Regexp
 }
 
@@ -18,7 +18,7 @@ type SvelteKitPlugin struct {
 func NewSvelteKitPlugin() *SvelteKitPlugin {
 	return &SvelteKitPlugin{
 		// 匹配 ../nodes/xxx.js 或 /_app/immutable/nodes/xxx.js
-		nodesRe: regexp.MustCompile(`["']\.\.?/nodes/([0-9a-zA-Z_-]+\.js)["']`),
+		nodesRe:  regexp.MustCompile(`["']\.\.?/nodes/([0-9a-zA-Z_-]+\.js)["']`),
 		chunksRe: regexp.MustCompile(`["']\.\.?/chunks/([0-9a-zA-Z_-]+\.js)["']`),
 	}
 }
@@ -58,14 +58,14 @@ func (p *SvelteKitPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeI
 		absoluteURL = extractor.NormalizeURL(absoluteURL)
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: input.SourceURL,
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		} else {
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     path,
-				FromURL: input.SourceURL,
+				URL:      path,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}
@@ -83,14 +83,14 @@ func (p *SvelteKitPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeI
 		absoluteURL = extractor.NormalizeURL(absoluteURL)
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: input.SourceURL,
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		} else {
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     path,
-				FromURL: input.SourceURL,
+				URL:      path,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}

@@ -57,14 +57,14 @@ func (p *NuxtJSPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInpu
 
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: input.SourceURL,
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		} else {
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     path,
-				FromURL: input.SourceURL,
+				URL:      path,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}

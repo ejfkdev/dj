@@ -51,14 +51,14 @@ func (p *ModuleFederationPlugin) Analyze(ctx context.Context, input *extractor.A
 		absoluteURL = extractor.NormalizeURL(absoluteURL)
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: input.SourceURL,
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		} else {
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     path,
-				FromURL: input.SourceURL,
+				URL:      path,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}

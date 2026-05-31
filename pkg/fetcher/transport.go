@@ -18,8 +18,8 @@ type protocol int
 
 const (
 	protoUnknown protocol = iota
-	protoH2 // HTTP/2 (uTLS)
-	protoH1 // HTTP/1.1 (uTLS)
+	protoH2               // HTTP/2 (uTLS)
+	protoH1               // HTTP/1.1 (uTLS)
 )
 
 func newProtocolCache() *protocolCache {

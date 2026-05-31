@@ -28,12 +28,12 @@ type KnowledgeBase struct {
 // NewKnowledgeBase 创建知识库
 func NewKnowledgeBase() *KnowledgeBase {
 	return &KnowledgeBase{
-		SeenURLs:        make(map[string]bool),
+		SeenURLs:         make(map[string]bool),
 		SeenFragments:    make(map[string]bool),
 		hasSourceMapURLs: make(map[string]bool),
-		PublicPaths:     make([]string, 0),
-		PrependURLs:     make([]string, 0),
-		KnownPaths:      make([]string, 0),
+		PublicPaths:      make([]string, 0),
+		PrependURLs:      make([]string, 0),
+		KnownPaths:       make([]string, 0),
 	}
 }
 

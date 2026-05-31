@@ -15,7 +15,7 @@ type VitePlugin struct {
 	// 匹配整个 __vite__mapDeps 函数体
 	mapDepsFuncRe *regexp.Regexp
 	// 从函数体中提取 JS 路径
-	mapDepsJsRe   *regexp.Regexp
+	mapDepsJsRe *regexp.Regexp
 }
 
 // NewVitePlugin 创建插件
@@ -76,14 +76,14 @@ func (p *VitePlugin) analyzeHTML(input *extractor.AnalyzeInput, result *extracto
 			absoluteURL = extractor.NormalizeURL(absoluteURL)
 			if extractor.IsAbsoluteURL(absoluteURL) {
 				result.URLs = append(result.URLs, extractor.DiscoveredJS{
-					URL:     absoluteURL,
-					FromURL: input.SourceURL,
+					URL:      absoluteURL,
+					FromURL:  input.SourceURL,
 					IsInline: false,
 				})
 			} else {
 				result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-					URL:     url,
-					FromURL: input.SourceURL,
+					URL:      url,
+					FromURL:  input.SourceURL,
 					IsInline: false,
 				})
 			}
@@ -101,14 +101,14 @@ func (p *VitePlugin) analyzeHTML(input *extractor.AnalyzeInput, result *extracto
 		absoluteURL = extractor.NormalizeURL(absoluteURL)
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: input.SourceURL,
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		} else {
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     url,
-				FromURL: input.SourceURL,
+				URL:      url,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}
@@ -129,14 +129,14 @@ func (p *VitePlugin) analyzeJS(input *extractor.AnalyzeInput, result *extractor.
 		absoluteURL = extractor.NormalizeURL(absoluteURL)
 		if extractor.IsAbsoluteURL(absoluteURL) {
 			result.URLs = append(result.URLs, extractor.DiscoveredJS{
-				URL:     absoluteURL,
-				FromURL: input.SourceURL,
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		} else {
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:     fragment,
-				FromURL: input.SourceURL,
+				URL:      fragment,
+				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
 		}
@@ -165,14 +165,14 @@ func (p *VitePlugin) analyzeJS(input *extractor.AnalyzeInput, result *extractor.
 			absoluteURL = extractor.NormalizeURL(absoluteURL)
 			if extractor.IsAbsoluteURL(absoluteURL) {
 				result.URLs = append(result.URLs, extractor.DiscoveredJS{
-					URL:     absoluteURL,
-					FromURL: input.SourceURL,
+					URL:      absoluteURL,
+					FromURL:  input.SourceURL,
 					IsInline: false,
 				})
 			} else {
 				result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-					URL:     jsPath,
-					FromURL: input.SourceURL,
+					URL:      jsPath,
+					FromURL:  input.SourceURL,
 					IsInline: false,
 				})
 			}
