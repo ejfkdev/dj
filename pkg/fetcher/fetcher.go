@@ -50,6 +50,7 @@ type Fetcher struct {
 	userAgent      string
 	cookieJar      http.CookieJar
 	browserHeaders bool
+	extraHeaders   map[string]string // 用户通过 --header 指定的自定义请求头
 }
 
 // NewFetcher 创建下载器（使用默认配置）
@@ -111,6 +112,7 @@ func NewFetcherWithConfig(cfg FetcherConfig) (*Fetcher, error) {
 		userAgent:      DefaultUserAgent,
 		cookieJar:      jar,
 		browserHeaders: cfg.UseUTLS,
+		extraHeaders:   make(map[string]string),
 	}, nil
 }
 
@@ -162,6 +164,18 @@ func (f *Fetcher) SetCookies(targetURL string, cookies []*http.Cookie) error {
 	return nil
 }
 
+// SetExtraHeaders 设置自定义请求头（用于 --header/-H）
+// 多次调用会合并；同 key 后设置的值会覆盖先前的值。
+// 自定义头在浏览器默认头之后应用，因此可以覆盖 User-Agent、Accept 等。
+func (f *Fetcher) SetExtraHeaders(headers map[string]string) {
+	if f.extraHeaders == nil {
+		f.extraHeaders = make(map[string]string)
+	}
+	for k, v := range headers {
+		f.extraHeaders[k] = v
+	}
+}
+
 // newRequest 创建一个带默认请求头的 GET 请求
 func (f *Fetcher) newRequest(rawURL string) (*http.Request, error) {
 	req, err := http.NewRequest("GET", rawURL, nil)
@@ -174,6 +188,11 @@ func (f *Fetcher) newRequest(rawURL string) (*http.Request, error) {
 	} else {
 		req.Header.Set("User-Agent", f.userAgent)
 		req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	}
+
+	// 应用用户通过 --header 指定的自定义头（覆盖默认头）
+	for k, v := range f.extraHeaders {
+		setHeaderValue(req, k, v)
 	}
 
 	return req, nil
