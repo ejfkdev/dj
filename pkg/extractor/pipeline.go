@@ -1262,9 +1262,9 @@ func (p *Pipeline) GetOutputResult() *OutputResult {
 
 	// 设置缓存目录
 	if p.cacheConfig != nil && p.cacheConfig.Enable && p.baseURL != "" {
-		// 使用与 saveJSToCache 相同的 host 提取逻辑
-		host := extractHost(p.baseURL)
-		result.CacheBase = filepath.Join(p.cacheConfig.BaseDir, "https_"+host)
+		// 使用与实际写入相同的目录命名规则
+		normalized := fetcher.NormalizeOrigin(p.baseURL)
+		result.CacheBase = filepath.Join(p.cacheConfig.BaseDir, normalized)
 		result.CacheDirs = &CacheDirs{
 			JS:   filepath.Join(result.CacheBase, "js"),
 			HTML: filepath.Join(result.CacheBase, "html", "web.html"),
