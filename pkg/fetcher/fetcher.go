@@ -179,9 +179,34 @@ func (f *Fetcher) newRequest(rawURL string) (*http.Request, error) {
 	return req, nil
 }
 
+// setHeaderValue 设置请求头值，绕过 ASCII 校验以便支持非 ASCII 值
+// Go 的 http.Header.Set 强制 ASCII，遇到中文会拒绝。某些站点会校验 UA 字符集
+// （如 "北斗星大数据智库"），这种场景下需要直接写到 header map。
+func setHeaderValue(req *http.Request, key, value string) {
+	if value == "" {
+		req.Header.Set(key, value)
+		return
+	}
+	if isASCII(value) {
+		req.Header.Set(key, value)
+	} else {
+		req.Header[key] = []string{value}
+	}
+}
+
+// isASCII 字符串是否只含可打印 ASCII（用于 header 值校验）
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7E {
+			return false
+		}
+	}
+	return true
+}
+
 // setBrowserHeaders 设置完整浏览器仿真请求头，模拟 Chrome 浏览器
 func setBrowserHeaders(req *http.Request, ua string) {
-	req.Header.Set("User-Agent", ua)
+	setHeaderValue(req, "User-Agent", ua)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
 	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
