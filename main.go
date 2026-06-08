@@ -16,6 +16,59 @@ import (
 
 var version = "dev" // 版本号，通过 -ldflags "-X main.version=x.x.x" 设置
 
+// parseFormat 输出格式字符串转换为内部常量
+func parseFormat(s string) (extractor.OutputFormat, bool) {
+	switch s {
+	case "json":
+		return extractor.FormatJSON, true
+	case "md":
+		return extractor.FormatMD, true
+	case "text":
+		return extractor.FormatText, true
+	}
+	return "", false
+}
+
+// isASCII 字符串是否只含可打印 ASCII（用于 UA 校验）
+func isASCII(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r > 0x7E {
+			return false
+		}
+	}
+	return true
+}
+
+// printHelp 输出帮助信息
+func printHelp() {
+	fmt.Printf("dj - JS/SourceMap Extractor %s\n", version)
+	fmt.Printf("Extract JS URLs and source maps from websites\n\n")
+	fmt.Printf("Usage: dj [options] <url>\n\n")
+	fmt.Printf("Options:\n")
+	fmt.Printf("  -d, --debug              enable debug output\n")
+	fmt.Printf("  -f, --format <fmt>       output format: text | json | md (default: text)\n")
+	fmt.Printf("      --cache              enable cache (default: on)\n")
+	fmt.Printf("      --cache=false        disable cache\n")
+	fmt.Printf("      --useragent <UA>     custom User-Agent string (ASCII only)\n")
+	fmt.Printf("      --ua <UA>            short alias for --useragent\n")
+	fmt.Printf("      --proxy <URL>        proxy URL: http://, https://, socks5://\n")
+	fmt.Printf("      --cookie <cookies>   cookies for bypassing Cloudflare\n")
+	fmt.Printf("  -h, --help               show this help\n\n")
+	fmt.Printf("Notes:\n")
+	fmt.Printf("  - URL is the first non-flag argument; flags can appear before or after it\n")
+	fmt.Printf("  - Flag values can be passed as --flag=value or as the next argument\n")
+	fmt.Printf("  - --useragent only accepts ASCII characters; non-ASCII values are ignored\n\n")
+	fmt.Printf("Examples:\n")
+	fmt.Printf("  dj https://example.com\n")
+	fmt.Printf("  dj -f md https://example.com\n")
+	fmt.Printf("  dj --debug --cache=false https://example.com\n")
+	fmt.Printf("  dj --useragent='Mozilla/5.0 ...' https://example.com\n")
+	fmt.Printf("  dj --proxy=socks5://127.0.0.1:7890 https://example.com\n")
+	fmt.Printf("  dj -f json --cookie 'cf_clearance=xxx; key=val' https://example.com\n")
+	fmt.Printf("  dj https://example.com -f md --debug\n\n")
+	fmt.Printf("Cache path: %s\n", fetcher.GetTempDir())
+}
+
 func main() {
 	// 解析参数
 	var debug bool
@@ -26,81 +79,124 @@ func main() {
 	var proxy string
 	var cookie string
 	var url string
+
+	// 取下一段参数值（支持 --flag value 和 --flag=value 两种形式）
+	nextValue := func(i *int) (string, bool) {
+		if *i+1 >= len(os.Args) {
+			return "", false
+		}
+		v := os.Args[*i+1]
+		if strings.HasPrefix(v, "-") && v != "-" {
+			return "", false
+		}
+		*i++
+		return v, true
+	}
+
+	// 分割 --flag=value 形式
+	splitEq := func(arg string) (string, string) {
+		if idx := strings.Index(arg, "="); idx > 0 {
+			return arg[:idx], arg[idx+1:]
+		}
+		return arg, ""
+	}
+
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
-		if arg == "--debug" || arg == "-d" || arg == "-debug" {
+		name, val := splitEq(arg)
+
+		switch {
+		case name == "--debug" || name == "-d" || name == "-debug":
 			debug = true
-		} else if strings.HasPrefix(arg, "--cache") {
-			// 支持 --cache 和 --cache=false
-			if strings.HasSuffix(arg, "=false") {
-				enableCache = false
-			} else if arg == "--cache" {
+		case name == "--cache":
+			// 显式 --cache=true/false 可在 val 中给值
+			if val == "" {
+				if v, ok := nextValue(&i); ok {
+					val = v
+				}
+			}
+			switch val {
+			case "", "true", "1", "yes", "on":
 				enableCache = true
+			case "false", "0", "no", "off":
+				enableCache = false
+			default:
+				fmt.Fprintf(os.Stderr, "invalid --cache value: %q\n", val)
+				os.Exit(1)
 			}
-		} else if strings.HasPrefix(arg, "--format=") {
-			format := strings.TrimPrefix(arg, "--format=")
-			switch format {
-			case "json":
-				outputFormat = extractor.FormatJSON
-			case "md":
-				outputFormat = extractor.FormatMD
-			case "text":
-				outputFormat = extractor.FormatText
+		case name == "--format" || name == "-f":
+			if val == "" {
+				if v, ok := nextValue(&i); ok {
+					val = v
+				} else {
+					fmt.Fprintln(os.Stderr, "missing value for --format/-f")
+					os.Exit(1)
+				}
 			}
-		} else if strings.HasPrefix(arg, "-f") {
-			// -f json / -f md / -f text
-			format := strings.TrimPrefix(arg, "-f")
-			if format == "" && i+1 < len(os.Args) {
-				i++
-				format = os.Args[i]
+			if f, ok := parseFormat(val); ok {
+				outputFormat = f
+			} else {
+				fmt.Fprintf(os.Stderr, "invalid --format value: %q (expected: text|json|md)\n", val)
+				os.Exit(1)
 			}
-			switch format {
-			case "json":
-				outputFormat = extractor.FormatJSON
-			case "md":
-				outputFormat = extractor.FormatMD
-			case "text":
-				outputFormat = extractor.FormatText
+		case name == "--useragent" || name == "--ua":
+			if val == "" {
+				if v, ok := nextValue(&i); ok {
+					val = v
+				} else {
+					fmt.Fprintln(os.Stderr, "missing value for --useragent")
+					os.Exit(1)
+				}
 			}
-		} else if strings.HasPrefix(arg, "--useragent=") {
-			userAgent = strings.TrimPrefix(arg, "--useragent=")
-		} else if strings.HasPrefix(arg, "--proxy=") {
-			proxy = strings.TrimPrefix(arg, "--proxy=")
-		} else if strings.HasPrefix(arg, "--cookie=") {
-			cookie = strings.TrimPrefix(arg, "--cookie=")
-		} else if arg == "--help" || arg == "-h" {
+			userAgent = val
+		case name == "--proxy":
+			if val == "" {
+				if v, ok := nextValue(&i); ok {
+					val = v
+				} else {
+					fmt.Fprintln(os.Stderr, "missing value for --proxy")
+					os.Exit(1)
+				}
+			}
+			proxy = val
+		case name == "--cookie":
+			if val == "" {
+				if v, ok := nextValue(&i); ok {
+					val = v
+				} else {
+					fmt.Fprintln(os.Stderr, "missing value for --cookie")
+					os.Exit(1)
+				}
+			}
+			cookie = val
+		case name == "--help" || name == "-h":
 			showHelp = true
-		} else if !strings.HasPrefix(arg, "-") {
-			url = arg
+		case strings.HasPrefix(name, "-"):
+			// 未知 flag
+			fmt.Fprintf(os.Stderr, "unknown flag: %s\n", arg)
+			os.Exit(1)
+		default:
+			// 第一个非 flag 位置参数视为 URL
+			if url == "" {
+				url = arg
+			}
 		}
 	}
 
 	if showHelp {
-		fmt.Printf("dj - JS/SourceMap Extractor %s\n", version)
-		fmt.Printf("Extract JS URLs and source maps from websites\n\n")
-		fmt.Printf("Usage: dj [--debug] [--cache[=false]] [-f format] [--useragent=<UA>] [--proxy=<proxy>] [--cookie=<cookies>] <url>\n")
-		fmt.Printf("  --debug: enable debug output\n")
-		fmt.Printf("  -f: output format (text, json, md), default: text\n")
-		fmt.Printf("      --cache is enabled by default, use --cache=false to disable\n")
-		fmt.Printf("  --useragent: custom User-Agent string for HTTP requests\n")
-		fmt.Printf("  --proxy: proxy URL (http/https/socks5, e.g., http://127.0.0.1:7890, socks5://127.0.0.1:1080)\n")
-		fmt.Printf("  --cookie: cookies for bypassing Cloudflare (e.g., \"cf_clearance=xxx; key=val\")\n")
-		fmt.Printf("Cache path: %s\n", fetcher.GetTempDir())
+		printHelp()
 		os.Exit(0)
 	}
 
 	if url == "" {
-		fmt.Printf("dj - JS/SourceMap Extractor %s\n", version)
-		fmt.Printf("Extract JS URLs and source maps from websites\n\n")
-		fmt.Printf("Usage: dj [--debug] [--cache[=false]] [-f format] [--useragent=<UA>] [--proxy=<proxy>] [--cookie=<cookies>] <url>\n")
-		fmt.Printf("  --debug: enable debug output\n")
-		fmt.Printf("  -f: output format (text, json, md), default: text\n")
-		fmt.Printf("      --cache is enabled by default, use --cache=false to disable\n")
-		fmt.Printf("  --useragent: custom User-Agent string for HTTP requests\n")
-		fmt.Printf("  --proxy: proxy URL (http/https/socks5, e.g., http://127.0.0.1:7890, socks5://127.0.0.1:1080)\n")
-		fmt.Printf("  --cookie: cookies for bypassing Cloudflare (e.g., \"cf_clearance=xxx; key=val\")\n")
-		fmt.Printf("Cache path: %s\n", fetcher.GetTempDir())
+		printHelp()
 		os.Exit(1)
+	}
+
+	// 校验 User-Agent：HTTP 头只接受可打印 ASCII；非 ASCII 直接忽略并回退到默认值
+	if userAgent != "" && !isASCII(userAgent) {
+		fmt.Fprintf(os.Stderr, "warning: --useragent contains non-ASCII characters, ignored (HTTP headers require ASCII)\n")
+		userAgent = ""
 	}
 
 	// 初始化插件注册中心

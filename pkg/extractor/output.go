@@ -76,18 +76,22 @@ func formatMD(result *OutputResult) string {
 		sb.WriteString("\n")
 	}
 	sb.WriteString("\n## Cache Directories\n")
-	sb.WriteString("- **js**: ")
-	sb.WriteString(result.CacheDirs.JS)
-	sb.WriteString("\n")
-	if result.Summary.SourceMapCount > 0 {
-		sb.WriteString("- **sourceMap**: ")
-		sb.WriteString(result.CacheDirs.SourceMap)
+	if result.CacheDirs == nil {
+		sb.WriteString("- cache disabled\n")
+	} else {
+		sb.WriteString("- **js**: ")
+		sb.WriteString(result.CacheDirs.JS)
 		sb.WriteString("\n")
-	}
-	if result.CacheDirs.Source != "" {
-		sb.WriteString("- **source**: ")
-		sb.WriteString(result.CacheDirs.Source)
-		sb.WriteString("\n")
+		if result.Summary.SourceMapCount > 0 {
+			sb.WriteString("- **sourceMap**: ")
+			sb.WriteString(result.CacheDirs.SourceMap)
+			sb.WriteString("\n")
+		}
+		if result.CacheDirs.Source != "" {
+			sb.WriteString("- **source**: ")
+			sb.WriteString(result.CacheDirs.Source)
+			sb.WriteString("\n")
+		}
 	}
 
 	return sb.String()
