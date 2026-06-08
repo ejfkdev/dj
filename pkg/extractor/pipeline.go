@@ -117,6 +117,11 @@ func (p *Pipeline) SetBrowserCookies(targetURL string, cookies []*http.Cookie) e
 	return p.fetcher.SetCookies(targetURL, cookies)
 }
 
+// SetExtraHeaders 设置自定义 HTTP 请求头
+func (p *Pipeline) SetExtraHeaders(headers map[string]string) {
+	p.fetcher.SetExtraHeaders(headers)
+}
+
 // SetBaseURL 设置起始 URL
 func (p *Pipeline) SetBaseURL(url string) {
 	p.baseURL = url

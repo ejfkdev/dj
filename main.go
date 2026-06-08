@@ -43,10 +43,13 @@ func printHelp() {
 	fmt.Printf("      --ua <UA>            short alias for --useragent\n")
 	fmt.Printf("      --proxy <URL>        proxy URL: http://, https://, socks5://\n")
 	fmt.Printf("      --cookie <cookies>   cookies for bypassing Cloudflare\n")
+	fmt.Printf("  -H, --header <K: V>      custom HTTP header, repeatable (curl-style, non-ASCII supported)\n")
 	fmt.Printf("  -h, --help               show this help\n\n")
 	fmt.Printf("Notes:\n")
 	fmt.Printf("  - URL is the first non-flag argument; flags can appear before or after it\n")
-	fmt.Printf("  - Flag values can be passed as --flag=value or as the next argument\n\n")
+	fmt.Printf("  - Flag values can be passed as --flag=value or as the next argument\n")
+	fmt.Printf("  - --header can be specified multiple times; later values override earlier ones\n")
+	fmt.Printf("  - --header overrides default browser headers (e.g. User-Agent, Accept)\n\n")
 	fmt.Printf("Examples:\n")
 	fmt.Printf("  dj https://example.com\n")
 	fmt.Printf("  dj -f md https://example.com\n")
@@ -54,6 +57,7 @@ func printHelp() {
 	fmt.Printf("  dj --useragent='Mozilla/5.0 ...' https://example.com\n")
 	fmt.Printf("  dj --proxy=socks5://127.0.0.1:7890 https://example.com\n")
 	fmt.Printf("  dj -f json --cookie 'cf_clearance=xxx; key=val' https://example.com\n")
+	fmt.Printf("  dj -H 'Referer: https://google.com' -H 'X-Token: abc' https://example.com\n")
 	fmt.Printf("  dj https://example.com -f md --debug\n\n")
 	fmt.Printf("Cache path: %s\n", fetcher.GetTempDir())
 }
@@ -68,6 +72,7 @@ func main() {
 	var proxy string
 	var cookie string
 	var url string
+	var rawHeaders []string // 收集所有 -H/--header 值，最后一次性解析
 
 	// 取下一段参数值（支持 --flag value 和 --flag=value 两种形式）
 	nextValue := func(i *int) (string, bool) {
@@ -158,6 +163,20 @@ func main() {
 				}
 			}
 			cookie = val
+		case name == "--header" || name == "-H":
+			if val == "" {
+				if v, ok := nextValue(&i); ok {
+					val = v
+				} else {
+					fmt.Fprintln(os.Stderr, "missing value for --header/-H")
+					os.Exit(1)
+				}
+			}
+			if !strings.Contains(val, ":") {
+				fmt.Fprintf(os.Stderr, "invalid --header value %q (expected \"Key: Value\" format)\n", val)
+				os.Exit(1)
+			}
+			rawHeaders = append(rawHeaders, val)
 		case name == "--help" || name == "-h":
 			showHelp = true
 		case strings.HasPrefix(name, "-"):
@@ -219,6 +238,19 @@ func main() {
 	if cookie != "" {
 		if err := pipeline.SetBrowserCookies(url, parseCookies(cookie)); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to set cookies: %v\n", err)
+		}
+	}
+
+	// 注入自定义 HTTP 请求头
+	if len(rawHeaders) > 0 {
+		headers, err := parseHeaders(rawHeaders)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to parse --header: %v\n", err)
+			os.Exit(1)
+		}
+		pipeline.SetExtraHeaders(headers)
+		if debug {
+			fmt.Fprintf(os.Stderr, "Custom headers: %d\n", len(headers))
 		}
 	}
 
@@ -285,4 +317,24 @@ func parseCookies(cookieStr string) []*http.Cookie {
 		}
 	}
 	return cookies
+}
+
+// parseHeaders 解析 curl 风格的 header 列表为 map
+// 格式: ["Key1: Value1", "Key2: Value2", ...]
+// 同 key 后出现的值覆盖先前的值（与 net/http Header.Add/Set 行为一致）
+func parseHeaders(rawList []string) (map[string]string, error) {
+	headers := make(map[string]string, len(rawList))
+	for _, raw := range rawList {
+		idx := strings.Index(raw, ":")
+		if idx <= 0 {
+			return nil, fmt.Errorf("invalid header %q (expected \"Key: Value\" format)", raw)
+		}
+		key := strings.TrimSpace(raw[:idx])
+		value := strings.TrimSpace(raw[idx+1:])
+		if key == "" {
+			return nil, fmt.Errorf("invalid header %q (empty key)", raw)
+		}
+		headers[key] = value
+	}
+	return headers, nil
 }
