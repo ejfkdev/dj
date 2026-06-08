@@ -29,16 +29,6 @@ func parseFormat(s string) (extractor.OutputFormat, bool) {
 	return "", false
 }
 
-// isASCII 字符串是否只含可打印 ASCII（用于 UA 校验）
-func isASCII(s string) bool {
-	for _, r := range s {
-		if r < 0x20 || r > 0x7E {
-			return false
-		}
-	}
-	return true
-}
-
 // printHelp 输出帮助信息
 func printHelp() {
 	fmt.Printf("dj - JS/SourceMap Extractor %s\n", version)
@@ -49,15 +39,14 @@ func printHelp() {
 	fmt.Printf("  -f, --format <fmt>       output format: text | json | md (default: text)\n")
 	fmt.Printf("      --cache              enable cache (default: on)\n")
 	fmt.Printf("      --cache=false        disable cache\n")
-	fmt.Printf("      --useragent <UA>     custom User-Agent string (ASCII only)\n")
+	fmt.Printf("      --useragent <UA>     custom User-Agent string (non-ASCII supported)\n")
 	fmt.Printf("      --ua <UA>            short alias for --useragent\n")
 	fmt.Printf("      --proxy <URL>        proxy URL: http://, https://, socks5://\n")
 	fmt.Printf("      --cookie <cookies>   cookies for bypassing Cloudflare\n")
 	fmt.Printf("  -h, --help               show this help\n\n")
 	fmt.Printf("Notes:\n")
 	fmt.Printf("  - URL is the first non-flag argument; flags can appear before or after it\n")
-	fmt.Printf("  - Flag values can be passed as --flag=value or as the next argument\n")
-	fmt.Printf("  - --useragent only accepts ASCII characters; non-ASCII values are ignored\n\n")
+	fmt.Printf("  - Flag values can be passed as --flag=value or as the next argument\n\n")
 	fmt.Printf("Examples:\n")
 	fmt.Printf("  dj https://example.com\n")
 	fmt.Printf("  dj -f md https://example.com\n")
@@ -191,12 +180,6 @@ func main() {
 	if url == "" {
 		printHelp()
 		os.Exit(1)
-	}
-
-	// 校验 User-Agent：HTTP 头只接受可打印 ASCII；非 ASCII 直接忽略并回退到默认值
-	if userAgent != "" && !isASCII(userAgent) {
-		fmt.Fprintf(os.Stderr, "warning: --useragent contains non-ASCII characters, ignored (HTTP headers require ASCII)\n")
-		userAgent = ""
 	}
 
 	// 初始化插件注册中心
