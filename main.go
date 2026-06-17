@@ -286,6 +286,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Pipeline error: %v\n", err)
 			os.Exit(1)
 		}
+
+		// 末尾追加汇总信息（JS 数、source map、源码还原、缓存目录）
+		result := pipeline.GetOutputResult()
+		fmt.Print(extractor.FormatTextSummary(result))
 	} else {
 		// json/md 模式：收集所有 URL 后统一输出
 		_, err := pipeline.Run(ctx, url)

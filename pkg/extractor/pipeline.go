@@ -11,9 +11,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ejfkdev/dj/pkg/fetcher"
+	"github.com/ejfkdev/dj/pkg/sourcemap"
 )
 
 const (
@@ -69,6 +71,19 @@ type Pipeline struct {
 	jsURLsMu sync.Mutex
 	jsURLs   []DiscoveredJS
 
+	// 还原出的源码文件计数（用于输出统计）
+	sourceCount int64
+
+	// 每个 JS URL 还原出的源码文件数（key: JS URL, value: 还原文件数）
+	// 用于 meta.json 条目级记录 sources_restored / restored_source_count
+	restoredCountMu sync.Mutex
+	restoredCount   map[string]int
+
+	// 每个 JS URL 还原出的源码文件相对路径列表（key: JS URL, value: 相对缓存根的路径）
+	// 用于 meta.json 条目级记录 restored_sources
+	restoredSourcesMu sync.Mutex
+	restoredSources   map[string][]string
+
 	// URL 上下文映射（用于在 processURL/processFragment 中添加 jsURLs 时获取上下文）
 	urlContext   map[string]DiscoveredJS // key: 规范化后的 URL
 	urlContextMu sync.RWMutex
@@ -77,14 +92,16 @@ type Pipeline struct {
 // NewPipeline 创建 Pipeline
 func NewPipeline(reg *PluginRegistry) *Pipeline {
 	return &Pipeline{
-		knowledge:   NewKnowledgeBase(),
-		registry:    reg,
-		fetcher:     fetcher.NewFetcher(),
-		tasks:       make([]string, 0),
-		fragments:   make([]DiscoveredJS, 0),
-		foundCh:     make(chan string, 100),
-		foundChSeen: make(map[string]bool),
-		urlContext:  make(map[string]DiscoveredJS),
+		knowledge:       NewKnowledgeBase(),
+		registry:        reg,
+		fetcher:         fetcher.NewFetcher(),
+		tasks:           make([]string, 0),
+		fragments:       make([]DiscoveredJS, 0),
+		foundCh:         make(chan string, 100),
+		foundChSeen:     make(map[string]bool),
+		urlContext:      make(map[string]DiscoveredJS),
+		restoredCount:   make(map[string]int),
+		restoredSources: make(map[string][]string),
 	}
 }
 
@@ -137,15 +154,44 @@ func (p *Pipeline) Run(ctx context.Context, startURL string) ([]string, error) {
 		p.knowledge.AddPrependURL(baseURL)
 	}
 
-	// 下载并保存起始页 HTML
+	// 下载并保存起始页 HTML（优先读缓存，未命中才走网络）
+	// 注意：起始页内容不在这里传给后续流程，后续由 processJSContent 处理起始 URL 时
+	// 再次读取（命中 HTML 缓存）。此处仅为确保 HTML 缓存存在。
 	if p.cacheConfig != nil && p.cacheConfig.Enable {
-		if htmlContent, err := p.fetcher.Fetch(startURL); err == nil {
+		if cached, ok := p.cacheConfig.LoadHTML(p.baseURL); ok {
+			// 缓存命中，幂等覆盖写一遍（保持文件新鲜度）
+			p.saveHTMLToCache(cached)
+			if p.Debug {
+				p.debugLog("Run: HTML cache hit, skip network: %s", startURL)
+			}
+		} else if htmlContent, err := p.fetcher.Fetch(startURL); err == nil {
 			p.saveHTMLToCache(htmlContent)
 		}
 	}
 
+	// 缓存复用模式：若 meta.json 存在（说明之前已完整探测过），直接从缓存恢复
+	// 已发现的 JS URL 列表及其 source map，跳过整个网络发现流程。
+	// 这避免了"缓存命中导致 JS 发现链顺序变化、漏发现"的问题——因为发现链依赖
+	// goroutine 调度顺序和 fragment 探测的时序，缓存命中（瞬时）与网络下载（有延迟）
+	// 会导致不同的发现路径，可能漏掉部分 chunk。
+	if p.cacheConfig != nil && p.cacheConfig.Enable {
+		if restored := p.loadFromCacheMetadata(); restored > 0 {
+			if p.Debug {
+				p.debugLog("Run: cache mode restored %d JS entries from meta.json, skip discovery", restored)
+			}
+			// 缓存恢复完成，跳过发现循环
+			// 安全关闭 found channel（text 模式依赖它结束 wg.Wait）
+			p.foundChClose.Do(func() {
+				close(p.foundCh)
+			})
+			p.saveSiteMetadata()
+			return p.knowledge.GetKnownPaths(), nil
+		}
+	}
+
 	// 将起始任务放入队列
-	p.tryEnqueue(startURL, nil) // 起始 URL 没有插件上下文
+	// 起始 URL 由用户命令行传入，标记发现方式为 CLI
+	p.tryEnqueue(startURL, &DiscoveredJS{URL: startURL, FromPlugin: "CLI"})
 
 	// 迭代处理：直到没有新 URLs 为止
 	for {
@@ -246,6 +292,28 @@ func (p *Pipeline) probeSourceMap(jsURL string) {
 	}
 	p.knowledge.MarkSeenURL(mapURL)
 
+	// 优先尝试缓存命中：若 source map 已在本地缓存，直接还原源码，跳过 HEAD+GET 网络请求
+	if p.cacheConfig != nil && p.cacheConfig.Enable {
+		if cached, ok := p.loadSourceMapCache(jsURL); ok {
+			if p.Debug {
+				p.debugLog("probeSourceMap: cache hit, skip network: %s", mapURL)
+			}
+			// 标记该 JS 有 source map，并触发 foundCh 通知
+			p.knowledge.SetJSHasSourceMap(jsURL, true)
+			p.foundChMu.Lock()
+			if !p.foundChSeen[mapURL] {
+				p.foundChSeen[mapURL] = true
+				select {
+				case p.foundCh <- mapURL:
+				default:
+				}
+			}
+			p.foundChMu.Unlock()
+			p.restoreSourcesFromMap(jsURL, mapURL, cached)
+			return
+		}
+	}
+
 	result, err := p.fetcher.FetchWithStatusHead(mapURL)
 	if err != nil {
 		if p.Debug {
@@ -278,6 +346,8 @@ func (p *Pipeline) probeSourceMap(jsURL string) {
 		mapContent, err := p.fetcher.Fetch(mapURL)
 		if err == nil {
 			p.saveSourceMapToCache(jsURL, mapContent)
+			// 从 source map 还原原始源码
+			p.restoreSourcesFromMap(jsURL, mapURL, mapContent)
 		}
 	}
 }
@@ -304,18 +374,18 @@ func (p *Pipeline) getRelativePath(fullURL, baseURL string) string {
 }
 
 // saveJSToCache 保存 JS 到缓存
-func (p *Pipeline) saveJSToCache(url string, content []byte) {
-	if p.cacheConfig == nil || !p.cacheConfig.Enable {
-		return
-	}
+// getJSCachePath 计算 JS URL 对应的缓存文件名（不含目录）。
+// 抽取自 saveJSToCache，确保读取和写入使用完全相同的路径计算逻辑。
+// 返回空字符串表示该 URL 无法生成有效缓存路径（如不属于 baseURL 同源）。
+func (p *Pipeline) getJSCachePath(url string) (filename string, ok bool) {
 	if p.baseURL == "" {
-		return
+		return "", false
 	}
 
 	// 获取相对路径
 	path := p.getRelativePath(url, p.baseURL)
 	if path == "" || path == url {
-		return
+		return "", false
 	}
 
 	// 提取 host 部分（用于生成扁平化文件名）
@@ -326,15 +396,60 @@ func (p *Pipeline) saveJSToCache(url string, content []byte) {
 	path = strings.ReplaceAll(path, "/", "-")
 
 	// 组合文件名: host-path.js (如果 path 不以 .js/.mjs/.css 结尾才加)
-	filename := host + "-" + path
+	filename = host + "-" + path
 	if !strings.HasSuffix(filename, ".js") && !strings.HasSuffix(filename, ".mjs") && !strings.HasSuffix(filename, ".css") {
 		filename += ".js"
 	}
+	return filename, true
+}
+
+// saveJSToCache 保存 JS 到缓存
+func (p *Pipeline) saveJSToCache(url string, content []byte) {
+	if p.cacheConfig == nil || !p.cacheConfig.Enable {
+		return
+	}
+
+	filename, ok := p.getJSCachePath(url)
+	if !ok {
+		return
+	}
+
 	if err := p.cacheConfig.SaveToCache(p.baseURL, "js", filename, content); err != nil {
 		if p.Debug {
 			p.debugLog("saveJSToCache failed: %v", err)
 		}
 	}
+}
+
+// loadJSCache 尝试从缓存读取 JS 内容。
+// 命中返回 (content, true)；未命中或缓存关闭返回 (nil, false)。
+// 路径计算与 saveJSToCache 完全一致（复用 getJSCachePath）。
+func (p *Pipeline) loadJSCache(url string) ([]byte, bool) {
+	if p.cacheConfig == nil || !p.cacheConfig.Enable {
+		return nil, false
+	}
+	filename, ok := p.getJSCachePath(url)
+	if !ok {
+		return nil, false
+	}
+	return p.cacheConfig.LoadFromCache(p.baseURL, "js", filename)
+}
+
+// loadSourceMapCache 尝试从缓存读取 source map 内容。
+// jsURL 是关联的 JS URL（用于计算相对路径，与 saveSourceMapToCache 一致）。
+// 命中返回 (content, true)；未命中返回 (nil, false)。
+func (p *Pipeline) loadSourceMapCache(jsURL string) ([]byte, bool) {
+	if p.cacheConfig == nil || !p.cacheConfig.Enable {
+		return nil, false
+	}
+	if p.baseURL == "" {
+		return nil, false
+	}
+	relPath := p.getRelativePath(jsURL, p.baseURL)
+	if relPath == "" || relPath == jsURL {
+		return nil, false
+	}
+	return p.cacheConfig.LoadSourceMap(p.baseURL, relPath)
 }
 
 // saveHTMLToCache 保存 HTML 到缓存
@@ -390,8 +505,8 @@ func (p *Pipeline) saveDataURIToCache(sourceJSURL, dataURI string) {
 		return
 	}
 
-	// 保存到缓存
-	cachePath, err := p.cacheConfig.SaveDataURI(p.baseURL, path, dataURI)
+	// 保存到缓存（同时返回解码后的内容，用于 source map 还原）
+	cachePath, mapContent, err := p.cacheConfig.SaveDataURI(p.baseURL, path, dataURI)
 	if err != nil {
 		if p.Debug {
 			p.debugLog("saveDataURIToCache failed: %v", err)
@@ -402,6 +517,154 @@ func (p *Pipeline) saveDataURIToCache(sourceJSURL, dataURI string) {
 	if p.Debug {
 		p.debugLog("saveDataURIToCache: saved inline source map to %s", cachePath)
 	}
+
+	// 内联 source map 同样还原原始源码
+	if len(mapContent) > 0 {
+		// dataURI 已包含 "data:" 前缀，直接作为 mapURL 用于日志
+		p.restoreSourcesFromMap(sourceJSURL, dataURI, mapContent)
+	}
+}
+
+// restoreSourcesFromMap 解析 source map 内容，将原始源码还原并写入缓存目录。
+//
+// 还原策略见 pkg/sourcemap 包文档：优先用 sourcesContent，缺失时用 mappings 回退。
+// 还原出的文件按 sources 字段的原始路径建立目录树，写入 sources/ 子目录。
+//
+// 参数：
+//   - jsURL: 关联的 JS URL（仅用于日志）
+//   - mapURL: source map 来源 URL（仅用于日志）
+//   - mapContent: source map JSON 原始字节
+func (p *Pipeline) restoreSourcesFromMap(jsURL, mapURL string, mapContent []byte) {
+	if p.cacheConfig == nil || !p.cacheConfig.Enable {
+		return
+	}
+	if p.baseURL == "" || len(mapContent) == 0 {
+		return
+	}
+
+	sm, err := sourcemap.Parse(mapContent)
+	if err != nil {
+		if p.Debug {
+			p.debugLog("restoreSourcesFromMap: parse failed for %s: %v", mapURL, err)
+		}
+		return
+	}
+
+	// 尝试获取压缩 JS 内容，用于 sourcesContent 缺失时的 mappings 回退。
+	// 此处不强制下载（sourcesContent 完整时不需要），失败时传 nil。
+	// 优先读缓存，缓存未命中才走网络（避免缓存模式下产生网络请求）
+	var minifiedContent []byte
+	if !sm.HasSourcesContent() {
+		if p.cacheConfig != nil && p.cacheConfig.Enable {
+			if cached, ok := p.loadJSCache(jsURL); ok {
+				minifiedContent = cached
+			}
+		}
+		if minifiedContent == nil {
+			if content, ferr := p.fetcher.Fetch(jsURL); ferr == nil {
+				minifiedContent = content
+			}
+		}
+	}
+
+	files, err := sourcemap.RestoreFiles(sm, minifiedContent)
+	if err != nil {
+		if p.Debug {
+			p.debugLog("restoreSourcesFromMap: restore failed for %s: %v", mapURL, err)
+		}
+		return
+	}
+
+	// 用 map 的文件名作为前缀，避免不同 chunk 还原出同名源文件时互相覆盖
+	mapPrefix := sourceMapFilePrefix(mapURL)
+
+	// 记录每个目标路径是否已写入，用于内容不同时的冲突处理
+	written := make(map[string]bool, len(files))
+	savedCount := 0
+	restoredRelPaths := make([]string, 0, len(files)) // 相对缓存根的路径，供 meta.json 记录
+	for _, f := range files {
+		targetPath := f.Path
+		// 若该路径已被本次还原写入过，加 map 前缀隔离
+		if written[targetPath] {
+			targetPath = filepath.Join(mapPrefix, f.Path)
+		}
+
+		cachePath, serr := p.cacheConfig.SaveSourceFile(p.baseURL, targetPath, f.Content)
+		if serr != nil {
+			if p.Debug {
+				p.debugLog("restoreSourcesFromMap: save %s failed: %v", targetPath, serr)
+			}
+			continue
+		}
+		written[targetPath] = true
+		savedCount++
+		atomic.AddInt64(&p.sourceCount, 1)
+
+		// 记录相对缓存根的路径（sources/<targetPath>），用于 meta.json
+		// 统一用 / 分隔符，保证跨平台可读
+		relPath := filepath.ToSlash(filepath.Join("sources", targetPath))
+		restoredRelPaths = append(restoredRelPaths, relPath)
+
+		if p.Debug {
+			p.debugLog("restoreSourcesFromMap: %s -> %s (mode=%s)", f.Path, cachePath, f.Mode)
+		}
+	}
+
+	if savedCount > 0 && p.Debug {
+		p.debugLog("restoreSourcesFromMap: restored %d source files from %s", savedCount, mapURL)
+	}
+
+	// 记录该 JS URL 的还原数量和源码相对路径，供 meta.json 条目级使用
+	if savedCount > 0 && jsURL != "" {
+		p.restoredCountMu.Lock()
+		p.restoredCount[jsURL] += savedCount
+		p.restoredCountMu.Unlock()
+
+		p.restoredSourcesMu.Lock()
+		p.restoredSources[jsURL] = append(p.restoredSources[jsURL], restoredRelPaths...)
+		p.restoredSourcesMu.Unlock()
+	}
+}
+
+// sourceMapFilePrefix 从 map URL 提取文件名（去扩展名）作为冲突隔离前缀
+func sourceMapFilePrefix(mapURL string) string {
+	// 去掉 query/fragment
+	if idx := strings.IndexAny(mapURL, "?#"); idx > 0 {
+		mapURL = mapURL[:idx]
+	}
+	// 取最后一段路径
+	if idx := strings.LastIndex(mapURL, "/"); idx >= 0 {
+		mapURL = mapURL[idx+1:]
+	}
+	// 去掉 .map 后缀
+	mapURL = strings.TrimSuffix(mapURL, ".map")
+	// 规范化为安全文件名段
+	var sb strings.Builder
+	for _, r := range mapURL {
+		switch {
+		case r == '/' || r == '\\' || r == ':' || r == '*' || r == '?' ||
+			r == '"' || r == '<' || r == '>' || r == '|' || r < 0x20:
+			sb.WriteByte('_')
+		default:
+			sb.WriteRune(r)
+		}
+	}
+	result := sb.String()
+	if result == "" {
+		return "map"
+	}
+	return result
+}
+
+// toRelPath 将绝对路径转为相对 baseDir 的相对路径，统一使用 / 分隔符。
+// 用于 meta.json 中所有本地路径，保证跨平台可移植。
+// 若 absPath 不在 baseDir 下（无法计算相对路径），返回 absPath 原值（用 / 分隔）。
+func toRelPath(baseDir, absPath string) string {
+	rel, err := filepath.Rel(baseDir, absPath)
+	if err != nil {
+		return filepath.ToSlash(absPath)
+	}
+	return filepath.ToSlash(rel)
 }
 
 // saveSiteMetadata 保存站点元数据到 JSON 文件
@@ -414,22 +677,66 @@ func (p *Pipeline) saveSiteMetadata() {
 	}
 
 	// 从 jsURLs 构建 URLs 列表（保留上下文）
+	// 所有本地路径使用相对 meta.json（缓存根目录）的相对路径，保证可移植性
+	cacheRoot := p.cacheConfig.GetCacheRoot(p.baseURL)
+
+	p.restoredCountMu.Lock()
+	restoredSnapshot := make(map[string]int, len(p.restoredCount))
+	for k, v := range p.restoredCount {
+		restoredSnapshot[k] = v
+	}
+	p.restoredCountMu.Unlock()
+
+	p.restoredSourcesMu.Lock()
+	restoredSourcesSnapshot := make(map[string][]string, len(p.restoredSources))
+	for k, v := range p.restoredSources {
+		cp := make([]string, len(v))
+		copy(cp, v)
+		restoredSourcesSnapshot[k] = cp
+	}
+	p.restoredSourcesMu.Unlock()
+
 	p.jsURLsMu.Lock()
 	jsMetadataList := make([]JSMetadata, 0, len(p.jsURLs))
 	for _, js := range p.jsURLs {
-		// 计算本地路径
+		// 计算本地路径（相对缓存根），与 saveJSToCache 写入路径一致（用 getJSCachePath）
 		localPath := ""
-		if path := p.getRelativePath(js.URL, p.baseURL); path != "" && path != js.URL {
-			localPath = p.cacheConfig.GetCachePath(p.baseURL, "js", path)
+		relPath := ""
+		if filename, ok := p.getJSCachePath(js.URL); ok {
+			absPath := p.cacheConfig.GetCachePath(p.baseURL, "js", filename)
+			localPath = toRelPath(cacheRoot, absPath)
 		}
-		jsMetadataList = append(jsMetadataList, JSMetadata{
+		if path := p.getRelativePath(js.URL, p.baseURL); path != "" && path != js.URL {
+			relPath = path
+		}
+
+		meta := JSMetadata{
 			URL:          js.URL,
 			LocalPath:    localPath,
 			SourceURL:    js.FromURL,
 			IsInline:     js.IsInline,
 			FromPlugin:   js.FromPlugin,
 			DiscoveredAt: time.Now().Unix(),
-		})
+		}
+
+		// 若该 JS 有关联的 source map，填充 source map URL 与本地路径
+		// 触发条件：1) SourceMapPlugin 从内容/头发现 sourceMappingURL；2) 已成功还原源码
+		restoredCount := restoredSnapshot[js.URL]
+		if (p.knowledge.JSHasSourceMap(js.URL) || restoredCount > 0) && relPath != "" {
+			meta.SourceMapURL = buildSourceMapURL(js.URL)
+			absSMPath := p.cacheConfig.GetCachePath(p.baseURL, "source_map", relPath+".map")
+			meta.SourceMapPath = toRelPath(cacheRoot, absSMPath)
+		}
+
+		// 填充源码还原状态：是否还原 + 还原文件数 + 还原出的源码相对路径列表
+		if restoredCount > 0 {
+			meta.SourcesRestored = true
+			meta.RestoredSourceCount = restoredCount
+			if srcs, ok := restoredSourcesSnapshot[js.URL]; ok && len(srcs) > 0 {
+				meta.RestoredSources = srcs
+			}
+		}
+		jsMetadataList = append(jsMetadataList, meta)
 	}
 	p.jsURLsMu.Unlock()
 
@@ -464,11 +771,28 @@ func (p *Pipeline) saveSiteMetadata() {
 		}
 	}
 
+	// 构建缓存目录信息（使用相对缓存根的相对路径）
+	cacheDirs := &CacheDirsMetadata{
+		HTML: filepath.ToSlash(filepath.Join("html", "web.html")),
+		JS:   "js",
+	}
+	// source_map 目录：仅当有 source map 时才记录
+	smPath := filepath.Join(cacheRoot, "source_map")
+	if countFilesInDir(smPath) > 0 {
+		cacheDirs.SourceMap = "source_map"
+	}
+	// sources 目录：仅当有还原源码时才记录
+	sourcesPath := p.cacheConfig.GetSourcesDir(p.baseURL)
+	if countFilesInDirRecursive(sourcesPath) > 0 {
+		cacheDirs.Sources = "sources"
+	}
+
 	// 从 knowledge 收集全局信息
 	metadata := SiteMetadata{
 		URLs:         jsMetadataList,
 		PrependURLs:  uniquePrependURLs,
 		PublicPaths:  p.knowledge.GetPublicPaths(),
+		CacheDirs:    cacheDirs,
 		DiscoveredAt: time.Now().Unix(),
 	}
 
@@ -486,6 +810,129 @@ func (p *Pipeline) saveSiteMetadata() {
 			p.debugLog("saveSiteMetadata failed: %v", err)
 		}
 	}
+}
+
+// loadFromCacheMetadata 从缓存的 meta.json 恢复之前探测的结果。
+//
+// 当 meta.json 存在时（说明之前已完整探测过该站点），直接读取其中记录的 JS URL 列表，
+// 将它们加入 jsURLs / KnownPaths / SeenURLs（避免重复发现），并为每个有 source map 的 JS
+// 从缓存恢复原始源码。返回恢复的 JS 条目数；返回 0 表示无缓存或恢复失败，调用方应走正常发现流程。
+//
+// 这解决了"缓存命中导致 JS 发现链顺序变化、漏发现 chunk"的问题：
+// 发现链依赖 goroutine 调度顺序和 fragment 探测时序，缓存命中（瞬时）与网络下载（有延迟）
+// 会产生不同的发现路径，可能遗漏部分 chunk。直接从 meta.json 恢复完整列表则不受此影响。
+func (p *Pipeline) loadFromCacheMetadata() int {
+	if p.cacheConfig == nil || !p.cacheConfig.Enable {
+		return 0
+	}
+	if p.baseURL == "" {
+		return 0
+	}
+
+	content, ok := p.cacheConfig.LoadMetadata(p.baseURL)
+	if !ok {
+		return 0
+	}
+
+	var metadata SiteMetadata
+	if err := json.Unmarshal(content, &metadata); err != nil {
+		if p.Debug {
+			p.debugLog("loadFromCacheMetadata: parse meta.json failed: %v", err)
+		}
+		return 0
+	}
+	if len(metadata.URLs) == 0 {
+		return 0
+	}
+
+	// 恢复知识库：PrependURLs、PublicPaths
+	p.knowledge.AddPrependURL(metadata.PrependURLs...)
+	p.knowledge.AddPublicPath(metadata.PublicPaths...)
+
+	// 恢复每个 JS URL 到 jsURLs / KnownPaths / SeenURLs
+	restored := 0
+	for _, jsMeta := range metadata.URLs {
+		jsURL := jsMeta.URL
+		if jsURL == "" {
+			continue
+		}
+		normalizedURL := NormalizeURL(jsURL)
+
+		// 标记为已发现，避免重复探测
+		p.knowledge.MarkSeenURL(normalizedURL)
+		p.knowledge.AddKnownPath(normalizedURL)
+
+		// 添加到 jsURLs（用于输出）
+		p.jsURLsMu.Lock()
+		p.jsURLs = append(p.jsURLs, DiscoveredJS{
+			URL:        normalizedURL,
+			FromURL:    jsMeta.SourceURL,
+			FromPlugin: jsMeta.FromPlugin,
+			IsInline:   jsMeta.IsInline,
+		})
+		p.jsURLsMu.Unlock()
+
+		// 发送到 foundCh（供 text 模式实时输出）
+		p.foundChMu.Lock()
+		if !p.foundChSeen[normalizedURL] {
+			p.foundChSeen[normalizedURL] = true
+			select {
+			case p.foundCh <- normalizedURL:
+			default:
+			}
+		}
+		p.foundChMu.Unlock()
+
+		// 若该 JS 有 source map，从缓存恢复源码
+		if jsMeta.SourceMapURL != "" {
+			p.knowledge.SetJSHasSourceMap(normalizedURL, true)
+
+			// 优化：若 meta.json 记录该 JS 已还原源码，且还原出的源码文件仍存在于磁盘，
+			// 则跳过重新解析 source map + 写文件的开销，直接恢复统计计数。
+			if jsMeta.SourcesRestored && p.sourcesAlreadyOnDisk(jsMeta.RestoredSources) {
+				count := len(jsMeta.RestoredSources)
+				if count == 0 {
+					count = jsMeta.RestoredSourceCount
+				}
+				atomic.AddInt64(&p.sourceCount, int64(count))
+				p.restoredCountMu.Lock()
+				p.restoredCount[normalizedURL] = count
+				p.restoredSourcesMu.Lock()
+				p.restoredSources[normalizedURL] = jsMeta.RestoredSources
+				p.restoredSourcesMu.Unlock()
+				p.restoredCountMu.Unlock()
+				if p.Debug {
+					p.debugLog("loadFromCacheMetadata: sources already on disk, skip restore: %s (%d files)", normalizedURL, count)
+				}
+			} else {
+				// 未还原过或文件缺失，从缓存读取 source map 重新还原
+				if cached, ok := p.loadSourceMapCache(normalizedURL); ok {
+					p.restoreSourcesFromMap(normalizedURL, jsMeta.SourceMapURL, cached)
+				}
+			}
+		}
+		restored++
+	}
+
+	return restored
+}
+
+// sourcesAlreadyOnDisk 检查还原出的源码文件是否都已存在于磁盘。
+// relPaths 是相对缓存根目录的路径列表（与 meta.json 的 restored_sources 一致）。
+// 空列表返回 false（无法确认，需重新还原）。
+func (p *Pipeline) sourcesAlreadyOnDisk(relPaths []string) bool {
+	if len(relPaths) == 0 || p.cacheConfig == nil || !p.cacheConfig.Enable {
+		return false
+	}
+	cacheRoot := p.cacheConfig.GetCacheRoot(p.baseURL)
+	for _, rel := range relPaths {
+		absPath := filepath.Join(cacheRoot, rel)
+		info, err := os.Stat(absPath)
+		if err != nil || info.IsDir() || info.Size() == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // processFragmentBatch 处理所有待探测的片段
@@ -568,7 +1015,8 @@ func (p *Pipeline) processJSContentURL(ctx context.Context, urlStr string) {
 	discovered, ok := p.urlContext[normalizedURL]
 	p.urlContextMu.RUnlock()
 	if !ok {
-		discovered = DiscoveredJS{URL: normalizedURL}
+		// 兜底：无上下文时标记为未知来源，确保 from_plugin 字段总有值
+		discovered = DiscoveredJS{URL: normalizedURL, FromPlugin: "Unknown"}
 	}
 
 	p.processJSContent(ctx, discovered)
@@ -578,34 +1026,88 @@ func (p *Pipeline) processJSContentURL(ctx context.Context, urlStr string) {
 func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS) {
 	normalizedURL := discovered.URL
 
-	// 下载内容
-	result, err := p.fetcher.FetchWithStatus(normalizedURL)
-	if err != nil {
-		if p.Debug {
-			p.debugLog("processJSContent fetch error: url=%s, err=%v", normalizedURL, err)
+	// 优先尝试缓存命中，避免网络下载。
+	// 缓存命中只替换"下载"这一步，后续插件分析、保存缓存等流程照常执行。
+	var content []byte
+	var contentType ContentType
+	var headers http.Header
+	cacheHit := false
+
+	if p.cacheConfig != nil && p.cacheConfig.Enable {
+		// 起始页（等于 baseURL）是 HTML，缓存在 html/web.html，走 HTML 缓存
+		if normalizedURL == p.baseURL {
+			if cached, ok := p.cacheConfig.LoadHTML(p.baseURL); ok {
+				content = cached
+				cacheHit = true
+			}
 		}
-		return
+		// 非起始页：尝试 JS 缓存
+		if !cacheHit {
+			if cached, ok := p.loadJSCache(normalizedURL); ok {
+				content = cached
+				cacheHit = true
+			}
+		}
 	}
 
-	// 只处理 2xx 响应
-	if result.StatusCode < 200 || result.StatusCode >= 300 {
-		return
-	}
+	if cacheHit {
+		if p.Debug {
+			p.debugLog("processJSContent: cache hit: %s", normalizedURL)
+		}
+		// 缓存无 HTTP 响应头，按缓存来源推断 Content-Type：
+		// - 起始页缓存（html/web.html）一定是 HTML
+		// - JS 缓存一定是 JS
+		if normalizedURL == p.baseURL {
+			contentType = ContentTypeHTML
+		} else {
+			contentType = ContentTypeJS
+		}
+	} else {
+		// 缓存未命中，走网络下载
+		result, err := p.fetcher.FetchWithStatus(normalizedURL)
+		if err != nil {
+			if p.Debug {
+				p.debugLog("processJSContent fetch error: url=%s, err=%v", normalizedURL, err)
+			}
+			return
+		}
 
-	// 检测 Content-Type（优先使用响应头）
-	contentType := p.detectContentTypeFromHeader(result.ContentType, result.Content)
+		// 只处理 2xx 响应
+		if result.StatusCode < 200 || result.StatusCode >= 300 {
+			return
+		}
+
+		content = result.Content
+		contentType = p.detectContentTypeFromHeader(result.ContentType, content)
+		headers = result.Headers
+	}
 
 	// 如果 URL 以 .js/.mjs/.jsonp 结尾，但 Content-Type 是 HTML，直接跳过
 	if contentType == ContentTypeHTML && isLikelyStaticResource(normalizedURL) {
 		return
 	}
 
+	// 处理 source map URL：当 .map 文件作为独立 URL 被下载时（由 SourceMapPlugin
+	// 从 JS 内容的 sourceMappingURL 发现），缓存它并还原原始源码。
+	// 这类 URL 的 Content-Type 通常是 application/json 而非 JS，不会走 JS 缓存分支。
+	if isSourceMapURL(normalizedURL) {
+		mapContent := content
+		// .map URL 本身不在 JS 缓存里，尝试从 source_map 缓存读取（按关联 JS URL 定位）
+		if p.cacheConfig != nil && p.cacheConfig.Enable && !cacheHit {
+			if cached, ok := p.loadSourceMapCache(discovered.FromURL); ok {
+				mapContent = cached
+			}
+		}
+		p.saveSourceMapToCache(discovered.FromURL, mapContent)
+		p.restoreSourcesFromMap(discovered.FromURL, normalizedURL, mapContent)
+	}
+
 	// 分发给所有插件分析
 	input := &AnalyzeInput{
 		SourceURL:   normalizedURL,
 		ContentType: contentType,
-		Content:     result.Content,
-		Headers:     result.Headers,
+		Content:     content,
+		Headers:     headers,
 	}
 	results := p.dispatchPlugins(ctx, input)
 
@@ -614,8 +1116,8 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 
 	// 如果是 JS，加入 jsURLs、foundCh、knownPaths
 	if contentType == ContentTypeJS {
-		// 保存 JS 到缓存
-		p.saveJSToCache(normalizedURL, result.Content)
+		// 保存 JS 到缓存（缓存命中时幂等覆盖，内容相同）
+		p.saveJSToCache(normalizedURL, content)
 
 		// 添加到 jsURLs（使用 discovered 上下文，去重）
 		p.jsURLsMu.Lock()
@@ -829,7 +1331,8 @@ func (p *Pipeline) processResults(ctx context.Context, results []*Result, source
 		for _, intermediate := range r.Intermediates {
 			normalizedURL := NormalizeURL(intermediate.URL)
 			if !p.knowledge.IsSeenURL(normalizedURL) {
-				p.tryEnqueue(normalizedURL, nil) // Intermediates 是配置文件，不需要 JS 上下文
+				// Intermediates 是配置文件，记录发现它的插件名
+				p.tryEnqueue(normalizedURL, &DiscoveredJS{URL: normalizedURL, FromPlugin: r.FromPlugin})
 			}
 		}
 
@@ -972,7 +1475,8 @@ func (p *Pipeline) processInlineResults(results []*Result, sourceURL string) {
 		for _, intermediate := range r.Intermediates {
 			normalizedURL := NormalizeURL(intermediate.URL)
 			if !p.knowledge.IsSeenURL(normalizedURL) {
-				p.tryEnqueue(normalizedURL, nil) // Intermediates 是配置文件，不需要 JS 上下文
+				// Intermediates 是配置文件，记录发现它的插件名
+				p.tryEnqueue(normalizedURL, &DiscoveredJS{URL: normalizedURL, FromPlugin: r.FromPlugin})
 			}
 		}
 
@@ -1195,6 +1699,17 @@ func isLikelyStaticResource(urlStr string) bool {
 		strings.HasSuffix(lowerURL, ".jpg")
 }
 
+// isSourceMapURL 判断 URL 是否指向 source map 文件
+// 同时处理带 query string 的情况（如 app.js.map?v=1）
+func isSourceMapURL(urlStr string) bool {
+	// 去掉 query/fragment
+	path := urlStr
+	if idx := strings.IndexAny(path, "?#"); idx >= 0 {
+		path = path[:idx]
+	}
+	return strings.HasSuffix(strings.ToLower(path), ".map")
+}
+
 // detectContentTypeFromHeader 优先从 HTTP 响应头检测 Content-Type
 func (p *Pipeline) detectContentTypeFromHeader(contentTypeHeader string, content []byte) ContentType {
 	// 解析 Content-Type header
@@ -1281,12 +1796,20 @@ func (p *Pipeline) GetOutputResult() *OutputResult {
 		if result.Summary.SourceMapCount > 0 {
 			result.CacheDirs.SourceMap = smPath
 		}
+
+		// 还原源码目录与计数（递归统计，因为按原始路径建了目录树）
+		sourcesPath := p.cacheConfig.GetSourcesDir(p.baseURL)
+		sourceCnt := countFilesInDirRecursive(sourcesPath)
+		if sourceCnt > 0 {
+			result.CacheDirs.Source = sourcesPath
+			result.Summary.SourceCount = sourceCnt
+		}
 	}
 
 	return result
 }
 
-// countFilesInDir 统计目录下文件数量
+// countFilesInDir 统计目录下文件数量（非递归，仅直接子文件）
 func countFilesInDir(dir string) int {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -1295,6 +1818,23 @@ func countFilesInDir(dir string) int {
 	count := 0
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			count++
+		}
+	}
+	return count
+}
+
+// countFilesInDirRecursive 递归统计目录下所有文件数量（含子目录）
+func countFilesInDirRecursive(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			count += countFilesInDirRecursive(filepath.Join(dir, entry.Name()))
+		} else {
 			count++
 		}
 	}
