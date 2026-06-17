@@ -27,6 +27,17 @@ type OutputResult struct {
 type Summary struct {
 	JSCount        int `json:"jsCount"`
 	SourceMapCount int `json:"sourceMapCount,omitempty"`
+	SourceCount    int `json:"sourceCount,omitempty"`
+}
+
+// HasSourceMap 是否发现 source map
+func (s Summary) HasSourceMap() bool {
+	return s.SourceMapCount > 0
+}
+
+// SourcesRestored 是否成功还原出源码
+func (s Summary) SourcesRestored() bool {
+	return s.SourceCount > 0
 }
 
 // CacheDirs 缓存目录
@@ -66,31 +77,77 @@ func formatMD(result *OutputResult) string {
 
 	sb.WriteString("## Summary\n")
 	sb.WriteString(fmt.Sprintf("- **JS files**: %d\n", result.Summary.JSCount))
-	if result.Summary.SourceMapCount > 0 {
-		sb.WriteString(fmt.Sprintf("- **Source maps**: %d\n", result.Summary.SourceMapCount))
+
+	// source map 状态
+	if result.Summary.HasSourceMap() {
+		sb.WriteString(fmt.Sprintf("- **Source maps**: %d (found)\n", result.Summary.SourceMapCount))
+	} else {
+		sb.WriteString("- **Source maps**: 0 (not found)\n")
 	}
+
+	// 源码还原状态
+	if result.Summary.SourcesRestored() {
+		sb.WriteString(fmt.Sprintf("- **Restored sources**: %d files (restored)\n", result.Summary.SourceCount))
+	} else {
+		sb.WriteString("- **Restored sources**: 0 (not restored)\n")
+	}
+
 	sb.WriteString("\n## JS URLs\n")
 	for _, url := range result.JSURLs {
 		sb.WriteString("- ")
 		sb.WriteString(url)
 		sb.WriteString("\n")
 	}
+
 	sb.WriteString("\n## Cache Directories\n")
 	if result.CacheDirs == nil {
 		sb.WriteString("- cache disabled\n")
 	} else {
-		sb.WriteString("- **js**: ")
-		sb.WriteString(result.CacheDirs.JS)
-		sb.WriteString("\n")
-		if result.Summary.SourceMapCount > 0 {
-			sb.WriteString("- **sourceMap**: ")
-			sb.WriteString(result.CacheDirs.SourceMap)
-			sb.WriteString("\n")
+		if result.CacheDirs.HTML != "" {
+			sb.WriteString(fmt.Sprintf("- **html**: %s\n", result.CacheDirs.HTML))
+		}
+		if result.CacheDirs.JS != "" {
+			sb.WriteString(fmt.Sprintf("- **js**: %s\n", result.CacheDirs.JS))
+		}
+		if result.CacheDirs.SourceMap != "" {
+			sb.WriteString(fmt.Sprintf("- **sourceMap**: %s\n", result.CacheDirs.SourceMap))
 		}
 		if result.CacheDirs.Source != "" {
-			sb.WriteString("- **source**: ")
-			sb.WriteString(result.CacheDirs.Source)
-			sb.WriteString("\n")
+			sb.WriteString(fmt.Sprintf("- **sources**: %s\n", result.CacheDirs.Source))
+		}
+	}
+
+	return sb.String()
+}
+
+// FormatTextSummary 生成 text 格式的末尾汇总信息。
+// text 模式下 JS URL 是实时流式打印的，此函数用于在末尾追加统计摘要，
+// 让用户一眼看到 source map 和源码还原情况。
+func FormatTextSummary(result *OutputResult) string {
+	var sb strings.Builder
+
+	sb.WriteString("\n--- Summary ---\n")
+	sb.WriteString(fmt.Sprintf("JS files: %d\n", result.Summary.JSCount))
+
+	if result.Summary.HasSourceMap() {
+		sb.WriteString(fmt.Sprintf("Source maps: %d (found)\n", result.Summary.SourceMapCount))
+	} else {
+		sb.WriteString("Source maps: 0 (not found)\n")
+	}
+
+	if result.Summary.SourcesRestored() {
+		sb.WriteString(fmt.Sprintf("Restored sources: %d files (restored)\n", result.Summary.SourceCount))
+	} else {
+		sb.WriteString("Restored sources: 0 (not restored)\n")
+	}
+
+	// 缓存目录
+	if result.CacheDirs != nil {
+		if result.CacheDirs.SourceMap != "" {
+			sb.WriteString(fmt.Sprintf("Source map dir: %s\n", result.CacheDirs.SourceMap))
+		}
+		if result.CacheDirs.Source != "" {
+			sb.WriteString(fmt.Sprintf("Sources dir: %s\n", result.CacheDirs.Source))
 		}
 	}
 

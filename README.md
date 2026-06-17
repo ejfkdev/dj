@@ -18,7 +18,8 @@
 - Deep analysis of website HTML and JS to extract dynamically loaded JavaScript files
 - Smart detection of dynamic loading patterns: import(), require(), webpack chunks, vite preload, etc.
 - Support for multiple frontend framework chunk mappings: Next.js, Nuxt.js, Vite, SvelteKit, Webpack, and more
-- Automatic Source Map discovery
+- Automatic Source Map discovery and **original source code restoration** (from `sourcesContent`, with `mappings` VLQ fallback)
+- **Cache reuse**: second run on the same site restores results from local cache with zero network requests
 - TLS fingerprint spoofing (uTLS Chrome fingerprint) to bypass Cloudflare and other WAFs
 - HTTP/2 and HTTP/1.1 protocol auto-negotiation
 - SOCKS5/HTTP/HTTPS proxy support with authentication
@@ -163,7 +164,18 @@ dj https://demo.1panel.cn
    - Dispatch to all plugins for pattern matching
 3. Plugins discover new JS URLs or path fragments, add to processing queue
 4. Probe for Source Map files (via `sourceMappingURL` or HTTP header)
-5. Collect all discovered JS URLs and output
+5. Restore original source code from Source Maps:
+   - Priority: extract from `sourcesContent` field (complete original source)
+   - Fallback: reconstruct from `mappings` (VLQ decoding) when `sourcesContent` is missing
+   - Restored files preserve original directory structure under `sources/`
+6. Collect all discovered JS URLs and output
+
+### Cache reuse
+
+When caching is enabled (default), the second run on the same site skips network requests entirely:
+- Loads previously discovered JS URLs from `meta.json`
+- Restores source maps and source code from local cache
+- Use `--cache=false` to force a full re-scan
 
 ## Output formats
 
@@ -181,7 +193,8 @@ https://example.com/js/async-def456.js
 {
   "summary": {
     "jsCount": 3,
-    "sourceMapCount": 1
+    "sourceMapCount": 1,
+    "sourceCount": 15
   },
   "jsURLs": [
     "https://example.com/js/main.js",
@@ -191,6 +204,7 @@ https://example.com/js/async-def456.js
   "cacheDirs": {
     "js": "/tmp/ejfkdev/dj/example.com/js",
     "sourceMap": "/tmp/ejfkdev/dj/example.com/source_map",
+    "source": "/tmp/ejfkdev/dj/example.com/sources",
     "html": "/tmp/ejfkdev/dj/example.com/html/web.html"
   }
 }
@@ -211,8 +225,9 @@ Cache structure:
 <temp_dir>/ejfkdev/dj/<origin>/
 ├── js/                    # Downloaded JS files
 ├── source_map/            # Source Map files
+├── sources/               # Restored original source code (preserves directory structure)
 ├── html/                  # Original HTML
-└── meta.json             # Site metadata
+└── meta.json             # Site metadata (JS URLs, source map paths, restored sources, cache dirs)
 ```
 
 ## FAQ

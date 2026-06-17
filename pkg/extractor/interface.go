@@ -95,10 +95,29 @@ type JSMetadata struct {
 	SourceMapURL string `json:"source_map_url,omitempty"`
 	// SourceMapPath 本地 source map 文件路径（如果有）
 	SourceMapPath string `json:"source_map_path,omitempty"`
+	// SourcesRestored 是否已从 source map 还原出原始源码
+	SourcesRestored bool `json:"sources_restored,omitempty"`
+	// RestoredSourceCount 从该 JS 的 source map 还原出的源码文件数量
+	RestoredSourceCount int `json:"restored_source_count,omitempty"`
+	// RestoredSources 从该 JS 的 source map 还原出的源码文件相对路径列表
+	// 路径相对于 meta.json 所在目录（即缓存根目录）
+	RestoredSources []string `json:"restored_sources,omitempty"`
 	// FromPlugin 发现该 JS 的插件名称
 	FromPlugin string `json:"from_plugin,omitempty"`
 	// DiscoveredAt 发现时间（Unix timestamp）
 	DiscoveredAt int64 `json:"discovered_at"`
+}
+
+// CacheDirsMetadata 缓存目录元数据，记录各资源类型在磁盘上的落盘位置
+type CacheDirsMetadata struct {
+	// HTML 站点 HTML 缓存文件路径
+	HTML string `json:"html,omitempty"`
+	// JS JS 文件缓存目录
+	JS string `json:"js,omitempty"`
+	// SourceMap source map 文件缓存目录
+	SourceMap string `json:"source_map,omitempty"`
+	// Sources 还原出的原始源码目录
+	Sources string `json:"sources,omitempty"`
 }
 
 // SiteMetadata 站点元数据（所有信息保存到一个 JSON 文件）
@@ -109,6 +128,8 @@ type SiteMetadata struct {
 	PrependURLs []string `json:"prepend_urls"`
 	// PublicPaths 探测时使用的 PublicPaths
 	PublicPaths []string `json:"public_paths"`
+	// CacheDirs 各资源类型的缓存目录路径
+	CacheDirs *CacheDirsMetadata `json:"cache_dirs,omitempty"`
 	// DiscoveredAt 探测开始时间
 	DiscoveredAt int64 `json:"discovered_at"`
 }

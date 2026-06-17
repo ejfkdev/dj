@@ -18,7 +18,8 @@
 - 深度分析网站 HTML 和 JS，提取动态加载的 JavaScript 文件
 - 智能探测动态加载模式：import()、require()、webpack chunk、vite preload 等
 - 支持多种前端框架的 chunk 映射：Next.js、Nuxt.js、Vite、SvelteKit、Webpack 等
-- 自动发现 Source Map 关联和位置
+- 自动发现 Source Map 并**还原原始源码**（优先 sourcesContent，缺失时用 mappings VLQ 回退）
+- **缓存复用**：第二次运行同一站点时从本地缓存恢复，零网络请求
 - TLS 指纹伪装（uTLS Chrome 指纹），绕过 Cloudflare 等 WAF
 - HTTP/2 和 HTTP/1.1 协议自动协商
 - SOCKS5/HTTP/HTTPS 代理支持，支持认证
@@ -142,7 +143,18 @@ dj https://demo.1panel.cn
    - 分发给所有插件进行模式匹配
 3. 插件发现新的 JS URL 或路径片段，添加到待处理队列
 4. 探测 Source Map 文件（通过 `sourceMappingURL` 或 HTTP 头）
-5. 收集所有发现的 JS URL 并输出
+5. 从 Source Map 还原原始源码：
+   - 优先：从 `sourcesContent` 字段提取完整原始源码
+   - 回退：`sourcesContent` 缺失时解析 `mappings`（VLQ 解码）重组
+   - 还原出的文件按原始目录结构写入 `sources/`
+6. 收集所有发现的 JS URL 并输出
+
+### 缓存复用
+
+启用缓存时（默认），第二次运行同一站点会完全跳过网络请求：
+- 从 `meta.json` 加载之前发现的 JS URL 列表
+- 从本地缓存恢复 source map 和源码
+- 使用 `--cache=false` 可强制全量重新扫描
 
 支持的动态加载模式和框架（共 16 个插件）：
 
@@ -183,7 +195,8 @@ https://example.com/js/async-def456.js
 {
   "summary": {
     "jsCount": 3,
-    "sourceMapCount": 1
+    "sourceMapCount": 1,
+    "sourceCount": 15
   },
   "jsURLs": [
     "https://example.com/js/main.js",
@@ -193,6 +206,7 @@ https://example.com/js/async-def456.js
   "cacheDirs": {
     "js": "/tmp/ejfkdev/dj/example.com/js",
     "sourceMap": "/tmp/ejfkdev/dj/example.com/source_map",
+    "source": "/tmp/ejfkdev/dj/example.com/sources",
     "html": "/tmp/ejfkdev/dj/example.com/html/web.html"
   }
 }
@@ -213,8 +227,9 @@ https://example.com/js/async-def456.js
 <temp_dir>/ejfkdev/dj/<origin>/
 ├── js/                    # 下载的 JS 文件
 ├── source_map/            # Source Map 文件
+├── sources/               # 还原出的原始源码（保留原始目录结构）
 ├── html/                  # 原始 HTML
-└── meta.json             # 站点元数据
+└── meta.json             # 站点元数据（JS URL、source map 路径、还原源码列表、缓存目录）
 ```
 
 ## 常见问题
