@@ -3,6 +3,7 @@ package plugins
 import (
 	"bytes"
 	"context"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -69,8 +70,23 @@ type WebpackPlugin struct {
 	// 匹配: "prefix/"+({name}[e]||e)+"."+{hash}[e]+".js"
 	webpackRequireUChunkPatternRe *regexp.Regexp
 	// a.u=function(c){return"js/chunk/"+{name:path}[c]+"."+{id:hash}[c]+".js"} 格式
-	// 匹配: "js/chunk/"+{1:"icons/xxx",...}[c]+"."+{1:"hash",...}[c]+".js"
+	// 匹配: "js/chunk/"+{id:"name"}[c]+"."+{id:"hash"}[c]+".js"
 	webpackChunkReturnPatternRe *regexp.Regexp
+
+	// 模式 A: HTML 内嵌 webpack runtime 存在性标记
+	// 匹配: {"chunk-039f3e34":1, "chunk-050a3119":1, ...}
+	// 注意: value 是数字 1（chunk 预加载标记），不是 hex hash
+	// 用途: 配合 runtime 指纹生成完整 chunk URL
+	chunkExistenceMapRe *regexp.Regexp
+	// 模式 C: webpack runtime 中的双段指纹字面量
+	// 匹配: +".HASH.TIMESTAMP.js" 或 + ".HASH.TIMESTAMP.js"
+	// 例如: l.p+""+({}[n=k]||n)+".5913e2749eb6975859bb.1725841547093.js"
+	// 提取 HASH.TIMESTAMP 部分，用于拼接完整 chunk URL
+	webpackRuntimeFingerprintRe *regexp.Regexp
+	// 模式 A 增强: chunk-id -> 双段 hash 完整映射（部分站点同时有）
+	// 匹配: "chunk-039f3e34":"5913e2749eb6975859bb.1725841547093"
+	// hash 长度不限（覆盖双段），用于直接生成 chunk URL
+	chunkHashMapFingerprintRe *regexp.Regexp
 
 	// 备用路径前缀正则（避免循环内重新编译）
 	fallbackRe *regexp.Regexp
@@ -83,6 +99,10 @@ type WebpackPlugin struct {
 
 	// 字符串 chunk ID -> hash 映射表（跨 JS 共享）
 	stringChunkHashMaps []map[string]string
+	// 跨 JS 共享的 runtime 指纹 (HASH.TIMESTAMP)
+	// 场景: HTML inline runtime 提取到 +".HASH.TIMESTAMP.js" 时填入，
+	// 后续 app.js 等只含 n.e("chunk-xxx") 的 JS 可复用此指纹拼接完整 URL
+	runtimeFingerprint string
 }
 
 // NewWebpackPlugin 创建插件
@@ -139,8 +159,17 @@ func NewWebpackPlugin() *WebpackPlugin {
 		// 匹配: "prefix"+((nameMap)[e]||e)+"."+(hashMap)[e]+".js"
 		webpackStaticChunkPatternRe: regexp.MustCompile(`"([^"]+/)"\s*\+\s*\(\s*\(([^)]+)\)\[\w+\]\s*\|\|\s*\w+\s*\)\s*\+\s*"\."\s*\+\s*\(([^)]+)\)\[\w+\]\s*\+\s*"\.js"`),
 		// a.u=function(c){return"js/chunk/"+{name:path}[c]+"."+{id:hash}[c]+".js"} 格式
-		// 匹配: "prefix/"+{id:"name"}[c]+"."+{id:"hash"}[c]+".js"
+		// 匹配: "js/chunk/"+{id:"name"}[c]+"."+{id:"hash"}[c]+".js"
 		webpackChunkReturnPatternRe: regexp.MustCompile(`"([^"]+/)"\s*\+\s*\{[^}]+\}\[\w+\]\s*\+\s*"\."\s*\+\s*\{[^}]+\}\[\w+\]\s*\+\s*"\.js"`),
+		// 模式 A: HTML 内嵌存在性标记 {"chunk-039f3e34":1, ...}
+		// 边界用 \b 避免误匹配 "chunk-xxx":12 等情况
+		chunkExistenceMapRe: regexp.MustCompile(`"(chunk-[0-9a-f]{6,})"\s*:\s*1\b`),
+		// 模式 C: runtime 指纹字面量 +".HASH.TIMESTAMP.js" 或 + ".HASH.TIMESTAMP.js"
+		// HASH 段 6-20 位 hex（contenthash），TIMESTAMP 段 10-16 位数字（毫秒或秒级时间戳）
+		webpackRuntimeFingerprintRe: regexp.MustCompile(`\+\s*["']\.([a-f0-9]{6,20}\.\d{10,16})\.js["']`),
+		// 模式 A 增强: chunk-id -> 双段 hash 完整映射 "chunk-xxx":"HASH.TIMESTAMP"
+		// 不限 hash 长度，专门覆盖 webpack 4 长 hash 场景
+		chunkHashMapFingerprintRe: regexp.MustCompile(`"(chunk-[0-9a-f]{6,})"\s*:\s*"([a-f0-9]{6,20}\.\d{10,16})"`),
 		// ({name}[e]||e)+"."+{hash}[e]+".js" 格式
 		// 匹配: ({812:"name",...}[e]||e)+"."+{236:"hash",...}[e]+".js"
 		webpackFederationChunkPatternRe: regexp.MustCompile(`\(\s*\{[^}]+\}\[\w+\]\s*\|\|\s*\w+\s*\)\s*\+\s*"\."\s*\+\s*\{[^}]+\}\[\w+\]\s*\+\s*"\.js"`),
@@ -783,6 +812,80 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 					FromURL:  input.SourceURL,
 					IsInline: false,
 				})
+			}
+		}
+	}
+
+	// === 新增: webpack 4 双段指纹 (HASH.TIMESTAMP) 模式 ===
+	// 适用场景: HTML 内嵌 runtime 形如 + ".5913e2749eb6975859bb.1725841547093.js"，
+	// 以及 {"chunk-xxx":1} 存在性标记、n.e("chunk-xxx") 字符串调用
+	// 这些 chunk URL 完整形态为 {chunk-id}.{HASH.TIMESTAMP}.js
+	// 生成绝对 URL ProbeTarget，绕开 pipeline.go:1513 isChunkIdPattern 拦截
+	// 指纹跨 JS 共享: HTML inline 解析时填入 p.runtimeFingerprint，
+	// 后续 app.js 等只含 n.e("chunk-xxx") 的 JS 可直接复用
+	runtimeFingerprint := p.runtimeFingerprint
+	if runtimeFingerprint == "" {
+		if fpMatch := p.webpackRuntimeFingerprintRe.FindStringSubmatch(content); len(fpMatch) > 1 {
+			runtimeFingerprint = fpMatch[1] // 例如 "5913e2749eb6975859bb.1725841547093"
+			// 存到 plugin 字段供后续 JS 文件复用
+			p.runtimeFingerprint = runtimeFingerprint
+		}
+	}
+
+	if runtimeFingerprint != "" {
+		// 辅助函数: 根据 chunk-id 生成完整绝对 URL
+		// 优先使用 input.SourceURL 的 scheme+host，确保跨域/同域场景都正确
+		buildChunkURL := func(chunkID string) string {
+			chunkFileName := chunkID + "." + runtimeFingerprint + ".js"
+			// 尝试基于 sourceURL 构造绝对 URL
+			if sourceURLParsed, err := url.Parse(input.SourceURL); err == nil && sourceURLParsed.Scheme != "" && sourceURLParsed.Host != "" {
+				// 提取 sourceURL 的目录部分（去掉文件名，保留到最后一个 /）
+				sourcePath := sourceURLParsed.Path
+				baseDir := sourcePath
+				if idx := strings.LastIndex(sourcePath, "/"); idx >= 0 {
+					baseDir = sourcePath[:idx+1] // 包含末尾 /
+				}
+				sourceURLParsed.Path = baseDir + chunkFileName
+				return sourceURLParsed.String()
+			}
+			// 兜底: 用 pathPrefix 拼接（现有变量，已在前面 fallback 阶段计算过）
+			return pathPrefix + chunkFileName
+		}
+
+		// 统一 chunk-id 收集 + 去重 + ProbeTarget 生成
+		// 三个正则都可能产生相同 chunk-id，优先级:
+		//   1. chunkHashMapFingerprintRe (最精确, 显式 hash 映射)
+		//   2. chunkExistenceMapRe (HTML 预加载标记)
+		//   3. webpackChunkLoadStringIdRe (n.e("chunk-xxx") 调用, 兜底)
+		seenChunks := make(map[string]bool)
+		addChunk := func(chunkID string) {
+			if seenChunks[chunkID] {
+				return
+			}
+			seenChunks[chunkID] = true
+			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
+				URL:      buildChunkURL(chunkID),
+				FromURL:  input.SourceURL,
+				IsInline: false,
+			})
+		}
+
+		// 模式 A 增强: chunk-id -> 双段 hash 完整映射
+		for _, m := range p.chunkHashMapFingerprintRe.FindAllStringSubmatch(content, -1) {
+			if len(m) > 2 {
+				addChunk(m[1])
+			}
+		}
+		// 模式 A: HTML 内嵌存在性标记 {"chunk-xxx":1, ...}
+		for _, m := range p.chunkExistenceMapRe.FindAllStringSubmatch(content, -1) {
+			addChunk(m[1])
+		}
+		// 模式 B 增强: 字符串 chunk ID 调用 n.e("chunk-xxx")
+		// 现有 fallback 逻辑会生成 "chunk-xxx-*.js" 但会被 isChunkIdPattern 拦截
+		// 这里结合 runtime 指纹直接生成完整 URL
+		for _, callMatch := range p.webpackChunkLoadStringIdRe.FindAllStringSubmatch(content, -1) {
+			if len(callMatch) > 2 {
+				addChunk(callMatch[2])
 			}
 		}
 	}
