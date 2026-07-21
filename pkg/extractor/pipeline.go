@@ -377,19 +377,52 @@ func (p *Pipeline) getRelativePath(fullURL, baseURL string) string {
 // getJSCachePath 计算 JS URL 对应的缓存文件名（不含目录）。
 // 抽取自 saveJSToCache，确保读取和写入使用完全相同的路径计算逻辑。
 // 返回空字符串表示该 URL 无法生成有效缓存路径（如不属于 baseURL 同源）。
+// extractURLHost 提取 URL 自身的 host（与 extractHost 不同：仅取到第一个 /）
+func extractURLHost(rawURL string) string {
+	// 去掉协议
+	host := rawURL
+	if strings.HasPrefix(host, "https://") {
+		host = host[8:]
+	} else if strings.HasPrefix(host, "http://") {
+		host = host[7:]
+	}
+	// 截到第一个 / 之前
+	if idx := strings.Index(host, "/"); idx >= 0 {
+		host = host[:idx]
+	}
+	// 端口的 : 替换为 _
+	host = strings.ReplaceAll(host, ":", "_")
+	return host
+}
+
 func (p *Pipeline) getJSCachePath(url string) (filename string, ok bool) {
 	if p.baseURL == "" {
 		return "", false
 	}
 
-	// 获取相对路径
-	path := p.getRelativePath(url, p.baseURL)
-	if path == "" || path == url {
+	// host 用 URL 自己的 host（跨域时避免与 baseURL 同名文件冲突）
+	host := extractURLHost(url)
+
+	// 计算 URL 完整 path（去掉协议+host）
+	// 同源: url[len(baseURL):] (path 不含 host)
+	// 跨域: url[ len(https://+host) : ]
+	scheme := "https://"
+	if !strings.HasPrefix(url, "https://") {
+		scheme = "http://"
+	}
+	urlHostEnd := len(scheme) + len(host) // 注意 host 已被 : -> _，不是原始长度
+	// 上面 host 已经是去掉 : 的形式，需要从原始 url 重新计算 host 长度
+	// 重新提取原始 host（含冒号和端口）
+	rawHost := url[len(scheme):]
+	if idx := strings.Index(rawHost, "/"); idx >= 0 {
+		rawHost = rawHost[:idx]
+	}
+	urlHostEnd = len(scheme) + len(rawHost)
+
+	if urlHostEnd > len(url) {
 		return "", false
 	}
-
-	// 提取 host 部分（用于生成扁平化文件名）
-	host := extractHost(p.baseURL)
+	path := url[urlHostEnd:]
 
 	// 去掉路径前导 /，将路径中的 / 替换为 -
 	path = strings.TrimPrefix(path, "/")
@@ -981,6 +1014,13 @@ func (p *Pipeline) processFragment(ctx context.Context, discovered DiscoveredJS)
 	for _, candidateURL := range candidateURLs {
 		normalizedURL := NormalizeURL(candidateURL)
 
+		// 去重：与 tryEnqueue 一致，依赖 knowledge.IsSeenURL 避免同一 URL 被并发处理多次
+		// （UniversalURLPlugin 加入后，跨多个 JS 的 URL 重复发现概率上升，此处必须加锁去重）
+		if p.knowledge.IsSeenURL(normalizedURL) {
+			continue
+		}
+		p.knowledge.MarkSeenURL(normalizedURL)
+
 		// 存储上下文
 		p.urlContextMu.Lock()
 		if _, ok := p.urlContext[normalizedURL]; !ok {
@@ -1260,71 +1300,7 @@ func (p *Pipeline) processResults(ctx context.Context, results []*Result, source
 		// 处理路径片段：收集到待处理列表，不立即探测
 		// 等所有插件运行完毕后，再统一探测
 		for _, discovered := range r.ProbeTargets {
-			if p.knowledge.IsSeenFragment(discovered.URL) {
-				continue
-			}
-			p.knowledge.MarkSeenFragment(discovered.URL)
-
-			// 如果已经是绝对 URL（包含 ://），直接入队
-			if strings.Contains(discovered.URL, "://") {
-				discovered.FromPlugin = r.FromPlugin
-				normalizedURL := NormalizeURL(discovered.URL)
-				if !p.knowledge.IsSeenURL(normalizedURL) {
-					if p.Debug {
-						p.debugLog("Fragment (absolute URL): %s", normalizedURL)
-					}
-					p.tryEnqueue(normalizedURL, &discovered)
-				}
-				continue
-			}
-
-			// 如果 fragment 没有路径（只是文件名如 "780.c5f8833f.js"）
-			// 直接使用 source URL 的目录 + fragment 作为完整 URL
-			if !strings.Contains(discovered.URL, "/") {
-				// 优先使用 source URL 的目录
-				fromDir := GetDirFromURL(discovered.FromURL)
-				if fromDir != "" {
-					fullURL := fromDir + discovered.URL
-					normalizedURL := NormalizeURL(fullURL)
-					if p.Debug {
-						p.debugLog("Fragment (from dir): %s -> %s", discovered.URL, normalizedURL)
-					}
-					if !p.knowledge.IsSeenURL(normalizedURL) {
-						p.tryEnqueue(normalizedURL, &DiscoveredJS{
-							URL:        normalizedURL,
-							FromURL:    discovered.FromURL,
-							FromPlugin: r.FromPlugin,
-						})
-					}
-				}
-
-				// 同时尝试 PrependURLs（可能有不同的域名）
-				for _, prependURL := range p.knowledge.GetPrependURLs() {
-					prependURLStr := prependURL
-					if !strings.HasSuffix(prependURLStr, "/") {
-						prependURLStr += "/"
-					}
-					fullURL := prependURLStr + discovered.URL
-					normalizedURL := NormalizeURL(fullURL)
-					if p.Debug {
-						p.debugLog("Fragment (from prepend): %s -> %s", discovered.URL, normalizedURL)
-					}
-					if !p.knowledge.IsSeenURL(normalizedURL) {
-						p.tryEnqueue(normalizedURL, &DiscoveredJS{
-							URL:        normalizedURL,
-							FromURL:    discovered.FromURL,
-							FromPlugin: r.FromPlugin,
-						})
-					}
-				}
-				continue
-			}
-
-			// 添加到 fragment slice 等待处理
-			discovered.FromPlugin = r.FromPlugin
-			p.fragmentMu.Lock()
-			p.fragments = append(p.fragments, discovered)
-			p.fragmentMu.Unlock()
+			p.dispatchProbeTarget(discovered, r.FromPlugin, false)
 		}
 
 		// 处理中间资源
@@ -1445,30 +1421,9 @@ func (p *Pipeline) processInlineResults(results []*Result, sourceURL string) {
 		}
 
 		// 处理路径片段
+		// inline 路径同步展开（不进入 p.fragments 队列，避免迭代爆炸）
 		for _, discovered := range r.ProbeTargets {
-			if p.knowledge.IsSeenFragment(discovered.URL) {
-				continue
-			}
-			p.knowledge.MarkSeenFragment(discovered.URL)
-
-			// 所有 fragment 都需要探测验证，不能直接加入 KnownPaths
-			if p.Debug {
-				p.debugLog("processInlineResults: probing fragment=%s from %s at %s", discovered.URL, sourceURL, time.Now().Format("15:04:05.000"))
-			}
-			candidateURLs := p.probeFragment(discovered.URL, sourceURL)
-			if p.Debug {
-				p.debugLog("processInlineResults: fragment=%s -> %d candidates at %s: %v", discovered.URL, len(candidateURLs), time.Now().Format("15:04:05.000"), candidateURLs)
-			}
-			for _, candidateURL := range candidateURLs {
-				normalizedURL := NormalizeURL(candidateURL)
-				if !p.knowledge.IsSeenURL(normalizedURL) {
-					p.tryEnqueue(normalizedURL, &DiscoveredJS{
-						URL:        normalizedURL,
-						FromURL:    discovered.FromURL,
-						FromPlugin: discovered.FromPlugin,
-					})
-				}
-			}
+			p.dispatchProbeTarget(discovered, r.FromPlugin, true)
 		}
 
 		// 处理中间资源
@@ -1482,6 +1437,92 @@ func (p *Pipeline) processInlineResults(results []*Result, sourceURL string) {
 
 		// 不再递归处理 InlineScripts，避免迭代爆炸
 	}
+}
+
+// dispatchProbeTarget 统一处理一个 ProbeTarget:
+//   - 绝对 URL (含 ://) 直接入队
+//   - 裸文件名 (不含 /) 用 sourceURL 目录 + PrependURLs 拼接
+//   - 含路径的 fragment: 异步路径 (inline=false) 进入 p.fragments 队列等待 batch 处理；
+//     inline 路径 (inline=true) 同步调用 probeFragment 展开后入队（避免无限迭代）
+//
+// 该函数被 processResults 和 processInlineResults 共用，保证两路径行为一致。
+func (p *Pipeline) dispatchProbeTarget(discovered DiscoveredJS, fromPlugin string, inline bool) {
+	if p.knowledge.IsSeenFragment(discovered.URL) {
+		return
+	}
+	p.knowledge.MarkSeenFragment(discovered.URL)
+
+	// 绝对 URL: 直接入队，避免 probeFragment 二次拼接
+	if strings.Contains(discovered.URL, "://") {
+		discovered.FromPlugin = fromPlugin
+		normalizedURL := NormalizeURL(discovered.URL)
+		if !p.knowledge.IsSeenURL(normalizedURL) {
+			if p.Debug {
+				p.debugLog("Fragment (absolute URL): %s", normalizedURL)
+			}
+			p.tryEnqueue(normalizedURL, &discovered)
+		}
+		return
+	}
+
+	// 裸文件名: 用 sourceURL 目录 + PrependURLs 拼接
+	if !strings.Contains(discovered.URL, "/") {
+		if fromDir := GetDirFromURL(discovered.FromURL); fromDir != "" {
+			fullURL := fromDir + discovered.URL
+			normalizedURL := NormalizeURL(fullURL)
+			if p.Debug {
+				p.debugLog("Fragment (from dir): %s -> %s", discovered.URL, normalizedURL)
+			}
+			if !p.knowledge.IsSeenURL(normalizedURL) {
+				p.tryEnqueue(normalizedURL, &DiscoveredJS{
+					URL:        normalizedURL,
+					FromURL:    discovered.FromURL,
+					FromPlugin: fromPlugin,
+				})
+			}
+		}
+
+		for _, prependURL := range p.knowledge.GetPrependURLs() {
+			prependURLStr := prependURL
+			if !strings.HasSuffix(prependURLStr, "/") {
+				prependURLStr += "/"
+			}
+			fullURL := prependURLStr + discovered.URL
+			normalizedURL := NormalizeURL(fullURL)
+			if p.Debug {
+				p.debugLog("Fragment (from prepend): %s -> %s", discovered.URL, normalizedURL)
+			}
+			if !p.knowledge.IsSeenURL(normalizedURL) {
+				p.tryEnqueue(normalizedURL, &DiscoveredJS{
+					URL:        normalizedURL,
+					FromURL:    discovered.FromURL,
+					FromPlugin: fromPlugin,
+				})
+			}
+		}
+		return
+	}
+
+	// 含路径 fragment: inline 同步展开，异步入队列
+	if inline {
+		candidateURLs := p.probeFragment(discovered.URL, discovered.FromURL)
+		for _, candidateURL := range candidateURLs {
+			normalizedURL := NormalizeURL(candidateURL)
+			if !p.knowledge.IsSeenURL(normalizedURL) {
+				p.tryEnqueue(normalizedURL, &DiscoveredJS{
+					URL:        normalizedURL,
+					FromURL:    discovered.FromURL,
+					FromPlugin: discovered.FromPlugin,
+				})
+			}
+		}
+		return
+	}
+
+	discovered.FromPlugin = fromPlugin
+	p.fragmentMu.Lock()
+	p.fragments = append(p.fragments, discovered)
+	p.fragmentMu.Unlock()
 }
 
 // probeFragment 基于已验证的真实 JS URL 来探测 fragment

@@ -134,13 +134,13 @@ dj https://show.cool-admin.com/login
 dj https://demo.1panel.cn
 ```
 
-## Supported patterns and frameworks (16 plugins)
+## Supported patterns and frameworks (17 plugins)
 
 | Framework/Tool | Features |
 |----------------|----------|
 | **HTMLScript** | Parse `<script src>` tags to extract directly referenced JS |
 | **DynamicImport** | `import()` dynamic loading, `import(/* webpackChunkName */)` comments |
-| **Webpack** | `__webpack_require__.e()` dynamic loading, chunk map detection, webpackChunk global, string chunk ID mapping |
+| **Webpack** | `__webpack_require__.e()` dynamic loading, chunk map detection, webpackChunk global, string chunk ID mapping, webpack 4 `HASH.TIMESTAMP` fingerprint + `{"chunk-xxx":1}` existence markers |
 | **Next.js** | App Router / Pages Router chunk detection, build manifest, flight chunk |
 | **Nuxt.js** | `/_nuxt/` path pattern, build assets |
 | **Vite** | `__vitePreload()`, modulepreload, lazy loading chunks |
@@ -154,6 +154,7 @@ dj https://demo.1panel.cn
 | **ModernJS** | ByteDance ModernJS route manifest, b.p publicPath |
 | **URLPattern** | General URL pattern matching and path probing |
 | **SourceMap** | `.map` file detection (via `sourceMappingURL`, HTTP header, or inline data URI) |
+| **UniversalURL** | Encoding-aware fallback: decodes JS escapes / URL encoding / Unicode / HTML entities, then captures `<script src>`, `import()`, `require()`, and loose `.js` string matches. Useful for `document.write` injection, custom loaders, and other patterns other plugins miss. |
 
 ## How it works
 
