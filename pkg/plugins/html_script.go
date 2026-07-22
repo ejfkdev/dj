@@ -9,12 +9,15 @@ import (
 	"golang.org/x/net/html"
 )
 
-// HTMLScriptPlugin 提取 HTML 中的 <script src>、modulepreload 和内联脚本
+// HTMLScriptPlugin 提取 HTML 中的 <script src>、modulepreload、prefetch 和内联脚本
 type HTMLScriptPlugin struct {
 	// 外部脚本
 	scriptRe *regexp.Regexp
 	// modulepreload 链接
 	modulePreloadRe *regexp.Regexp
+	// prefetch 链接（Vite/Webpack5/Next.js 生产构建常用模式）
+	// 独立于 modulePreloadRe，避免影响 modulepreload 提取逻辑
+	prefetchRe *regexp.Regexp
 	// ES module entry script
 	entryScriptRe *regexp.Regexp
 }
@@ -25,6 +28,11 @@ func NewHTMLScriptPlugin() *HTMLScriptPlugin {
 		scriptRe: regexp.MustCompile(`<script[^>]*\bsrc=["']?([^"'>\s]+)["']?`),
 		// 匹配 <link rel="modulepreload" href="...">
 		modulePreloadRe: regexp.MustCompile(`<link[^>]+rel=["']modulepreload["'][^>]+href=["']([^"']+)["']`),
+		// 匹配 <link rel="prefetch" href="..."> 或 <link href="..." rel="prefetch">
+		// 兼容属性顺序：href 可在 rel 之前或之后（生产 HTML 两种都常见）
+		// Vue 3 / Vite 生产构建会用此标签预取所有异步 chunk
+		// 注：独立于 modulePreloadRe，按用户要求不修改 modulepreload 提取逻辑
+		prefetchRe: regexp.MustCompile(`<link[^>]+(?:href=["']([^"']+\.js)["'][^>]*rel=["']prefetch["']|rel=["']prefetch["'][^>]+href=["']([^"']+\.js)["'])`),
 		// 匹配 <script type="module" src="...">
 		entryScriptRe: regexp.MustCompile(`<script[^>]+type=["']module["'][^>]*src=["']([^"']+)["']`),
 	}
@@ -77,6 +85,32 @@ func (p *HTMLScriptPlugin) Analyze(ctx context.Context, input *extractor.Analyze
 			continue
 		}
 		href := string(match[1])
+		absoluteURL := extractor.ResolveRelativePath(input.SourceURL, href)
+		absoluteURL = extractor.NormalizeURL(absoluteURL)
+		if extractor.IsAbsoluteURL(absoluteURL) {
+			result.URLs = append(result.URLs, extractor.DiscoveredJS{
+				URL:      absoluteURL,
+				FromURL:  input.SourceURL,
+				IsInline: false,
+			})
+		}
+	}
+
+	// 提取 prefetch 链接（独立于 modulepreload 循环，避免影响已有逻辑）
+	// Vite / Webpack 5 / Next.js 生产构建常用此标签预取所有异步 chunk
+	// 正则有两个 capture group：href-在前 (group 1) 或 rel-在前 (group 2)，二选一
+	for _, match := range p.prefetchRe.FindAllSubmatch(input.Content, -1) {
+		if len(match) < 3 {
+			continue
+		}
+		// 二选一取非空的那一个
+		href := string(match[1])
+		if href == "" {
+			href = string(match[2])
+		}
+		if href == "" {
+			continue
+		}
 		absoluteURL := extractor.ResolveRelativePath(input.SourceURL, href)
 		absoluteURL = extractor.NormalizeURL(absoluteURL)
 		if extractor.IsAbsoluteURL(absoluteURL) {
