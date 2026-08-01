@@ -38,7 +38,7 @@ func printHelp() {
 	fmt.Printf("  -d, --debug              enable debug output\n")
 	fmt.Printf("  -f, --format <fmt>       output format: text | json | md (default: text)\n")
 	fmt.Printf("      --cache              enable cache (default: on)\n")
-	fmt.Printf("      --cache=false        disable cache\n")
+	fmt.Printf("      --cache=false        disable cache reads (still saves to disk)\n")
 	fmt.Printf("      --useragent <UA>     custom User-Agent string (non-ASCII supported)\n")
 	fmt.Printf("      --ua <UA>            short alias for --useragent\n")
 	fmt.Printf("      --proxy <URL>        proxy URL: http://, https://, socks5://\n")
@@ -257,13 +257,14 @@ func main() {
 	}
 
 	// 设置缓存配置
-	if enableCache {
-		cacheConfig := &fetcher.CacheConfig{
-			Enable:  true,
-			BaseDir: fetcher.GetTempDir(),
-		}
-		pipeline.SetCacheConfig(cacheConfig)
+	// --cache=false 时 Enable=false 但 WriteEnabled=true：每次都走网络下载（不读缓存），
+	// 但下载的 JS / source map / 还原源码仍然保存到磁盘。
+	cacheConfig := &fetcher.CacheConfig{
+		Enable:       enableCache,
+		WriteEnabled: !enableCache, // cache=false 时仍写磁盘
+		BaseDir:      fetcher.GetTempDir(),
 	}
+	pipeline.SetCacheConfig(cacheConfig)
 
 	// 执行
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -73,7 +73,7 @@ dj -f md https://example.com
 | `--debug` | Enable debug output |
 | `-f <format>` | Output format: `text` (default), `json`, `md` |
 | `--cache` | Enable caching (enabled by default) |
-| `--cache=false` | Disable caching |
+| `--cache=false` | Disable cache reads (still saves downloaded files to disk) |
 | `--useragent=<UA>` | Custom User-Agent string |
 | `--proxy=<URL>` | Proxy URL (http/https/socks5), overrides environment variables |
 | `--cookie=<cookies>` | Cookies for bypassing Cloudflare (e.g., `"cf_clearance=xxx"`) |
@@ -176,7 +176,7 @@ dj https://demo.1panel.cn
 When caching is enabled (default), the second run on the same site skips network requests entirely:
 - Loads previously discovered JS URLs from `meta.json`
 - Restores source maps and source code from local cache
-- Use `--cache=false` to force a full re-scan
+- Use `--cache=false` to force a full re-scan (files are still saved to disk, just not read from cache)
 
 ## Output formats
 

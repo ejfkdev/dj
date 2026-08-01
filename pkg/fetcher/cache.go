@@ -13,6 +13,15 @@ import (
 type CacheConfig struct {
 	Enable  bool
 	BaseDir string // 缓存根目录，如 /tmp/ejfkdev/dj
+	// WriteEnabled 控制"写入"行为。--cache=false 时 Enable=false 但 WriteEnabled=true，
+	// 即每次都走网络下载（不读缓存），但下载后仍保存到磁盘。
+	WriteEnabled bool
+}
+
+// CanWrite 返回是否允许写入缓存（Enable 模式或 save-only 模式均允许）。
+// 用于统一守卫所有 Save 操作：只要允许写入就执行。
+func (c *CacheConfig) CanWrite() bool {
+	return c.Enable || c.WriteEnabled
 }
 
 // GetTempDir 获取临时目录
@@ -89,7 +98,7 @@ func (c *CacheConfig) GetCachePath(baseURL, subDir, urlPath string) string {
 
 // SaveToCache 保存内容到缓存
 func (c *CacheConfig) SaveToCache(baseURL, subDir, urlPath string, content []byte) error {
-	if !c.Enable {
+	if !c.CanWrite() {
 		return nil
 	}
 
@@ -112,7 +121,7 @@ func (c *CacheConfig) SaveToCache(baseURL, subDir, urlPath string, content []byt
 // SaveMetadata 保存元数据 JSON 到缓存
 // 如果 urlPath 为空，保存到根目录的 meta.json
 func (c *CacheConfig) SaveMetadata(baseURL, urlPath string, metadata []byte) error {
-	if !c.Enable {
+	if !c.CanWrite() {
 		return nil
 	}
 
@@ -148,7 +157,7 @@ func (c *CacheConfig) SaveMetadata(baseURL, urlPath string, metadata []byte) err
 // urlPath: 来源 JS 的路径
 // 返回保存的路径和解码后的原始内容（content 用于后续 source map 还原）
 func (c *CacheConfig) SaveDataURI(baseURL, urlPath, dataURI string) (string, []byte, error) {
-	if !c.Enable {
+	if !c.CanWrite() {
 		return "", nil, nil
 	}
 
@@ -207,7 +216,7 @@ func (c *CacheConfig) SaveDataURI(baseURL, urlPath, dataURI string) (string, []b
 // content: 文件内容
 // 返回写入的完整文件路径
 func (c *CacheConfig) SaveSourceFile(baseURL, sourcePath string, content []byte) (string, error) {
-	if !c.Enable {
+	if !c.CanWrite() {
 		return "", nil
 	}
 	if sourcePath == "" {

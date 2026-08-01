@@ -157,15 +157,23 @@ func (p *Pipeline) Run(ctx context.Context, startURL string) ([]string, error) {
 	// 下载并保存起始页 HTML（优先读缓存，未命中才走网络）
 	// 注意：起始页内容不在这里传给后续流程，后续由 processJSContent 处理起始 URL 时
 	// 再次读取（命中 HTML 缓存）。此处仅为确保 HTML 缓存存在。
-	if p.cacheConfig != nil && p.cacheConfig.Enable {
-		if cached, ok := p.cacheConfig.LoadHTML(p.baseURL); ok {
-			// 缓存命中，幂等覆盖写一遍（保持文件新鲜度）
-			p.saveHTMLToCache(cached)
-			if p.Debug {
-				p.debugLog("Run: HTML cache hit, skip network: %s", startURL)
+	// save-only 模式（--cache=false）下不读缓存，直接走网络下载并保存。
+	if p.cacheConfig != nil && p.cacheConfig.CanWrite() {
+		if p.cacheConfig.Enable {
+			if cached, ok := p.cacheConfig.LoadHTML(p.baseURL); ok {
+				// 缓存命中，幂等覆盖写一遍（保持文件新鲜度）
+				p.saveHTMLToCache(cached)
+				if p.Debug {
+					p.debugLog("Run: HTML cache hit, skip network: %s", startURL)
+				}
+			} else if htmlContent, err := p.fetcher.Fetch(startURL); err == nil {
+				p.saveHTMLToCache(htmlContent)
 			}
-		} else if htmlContent, err := p.fetcher.Fetch(startURL); err == nil {
-			p.saveHTMLToCache(htmlContent)
+		} else {
+			// save-only 模式：不读缓存，直接走网络下载并保存
+			if htmlContent, err := p.fetcher.Fetch(startURL); err == nil {
+				p.saveHTMLToCache(htmlContent)
+			}
 		}
 	}
 
@@ -438,7 +446,7 @@ func (p *Pipeline) getJSCachePath(url string) (filename string, ok bool) {
 
 // saveJSToCache 保存 JS 到缓存
 func (p *Pipeline) saveJSToCache(url string, content []byte) {
-	if p.cacheConfig == nil || !p.cacheConfig.Enable {
+	if p.cacheConfig == nil || !p.cacheConfig.CanWrite() {
 		return
 	}
 
@@ -487,7 +495,7 @@ func (p *Pipeline) loadSourceMapCache(jsURL string) ([]byte, bool) {
 
 // saveHTMLToCache 保存 HTML 到缓存
 func (p *Pipeline) saveHTMLToCache(content []byte) {
-	if p.cacheConfig == nil || !p.cacheConfig.Enable {
+	if p.cacheConfig == nil || !p.cacheConfig.CanWrite() {
 		return
 	}
 	if p.baseURL == "" {
@@ -503,7 +511,7 @@ func (p *Pipeline) saveHTMLToCache(content []byte) {
 
 // saveSourceMapToCache 保存 source map 到缓存
 func (p *Pipeline) saveSourceMapToCache(jsURL string, content []byte) {
-	if p.cacheConfig == nil || !p.cacheConfig.Enable {
+	if p.cacheConfig == nil || !p.cacheConfig.CanWrite() {
 		return
 	}
 	if p.baseURL == "" {
@@ -525,7 +533,7 @@ func (p *Pipeline) saveSourceMapToCache(jsURL string, content []byte) {
 
 // saveDataURIToCache 保存 data URI 到缓存
 func (p *Pipeline) saveDataURIToCache(sourceJSURL, dataURI string) {
-	if p.cacheConfig == nil || !p.cacheConfig.Enable {
+	if p.cacheConfig == nil || !p.cacheConfig.CanWrite() {
 		return
 	}
 	if p.baseURL == "" {
@@ -568,7 +576,7 @@ func (p *Pipeline) saveDataURIToCache(sourceJSURL, dataURI string) {
 //   - mapURL: source map 来源 URL（仅用于日志）
 //   - mapContent: source map JSON 原始字节
 func (p *Pipeline) restoreSourcesFromMap(jsURL, mapURL string, mapContent []byte) {
-	if p.cacheConfig == nil || !p.cacheConfig.Enable {
+	if p.cacheConfig == nil || !p.cacheConfig.CanWrite() {
 		return
 	}
 	if p.baseURL == "" || len(mapContent) == 0 {
@@ -702,7 +710,7 @@ func toRelPath(baseDir, absPath string) string {
 
 // saveSiteMetadata 保存站点元数据到 JSON 文件
 func (p *Pipeline) saveSiteMetadata() {
-	if p.cacheConfig == nil || !p.cacheConfig.Enable {
+	if p.cacheConfig == nil || !p.cacheConfig.CanWrite() {
 		return
 	}
 	if p.baseURL == "" {
@@ -1821,8 +1829,8 @@ func (p *Pipeline) GetOutputResult() *OutputResult {
 		JSURLs: jsURLList,
 	}
 
-	// 设置缓存目录
-	if p.cacheConfig != nil && p.cacheConfig.Enable && p.baseURL != "" {
+	// 设置缓存目录（save-only 模式下也输出，因为文件已写入磁盘）
+	if p.cacheConfig != nil && p.cacheConfig.CanWrite() && p.baseURL != "" {
 		// 使用与实际写入相同的目录命名规则
 		normalized := fetcher.NormalizeOrigin(p.baseURL)
 		result.CacheBase = filepath.Join(p.cacheConfig.BaseDir, normalized)
