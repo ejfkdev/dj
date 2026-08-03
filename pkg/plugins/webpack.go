@@ -425,6 +425,34 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 			})
 		}
 
+		// 回退：当 idValueRe（数字 key）未提取到 hash 映射时，
+		// 尝试用 stringChunkHashMapRe 提取字符串 key（如 "chunk-21d8d700":"f24ace7c"）的映射。
+		// 场景: webpack 4 inline runtime 中 chunk ID 是字符串格式而非数字
+		if len(hashMap) == 0 {
+			for _, sm := range p.stringChunkHashMapRe.FindAllStringSubmatch(content, -1) {
+				if len(sm) > 2 {
+					chunkID := sm[1] // "chunk-21d8d700"
+					hash := sm[2]    // "f24ace7c"
+					if _, exists := hashMap[chunkID]; exists {
+						continue
+					}
+					hashMap[chunkID] = hash
+					// 字符串 chunk ID 的 name 通常与 ID 相同（nameMap 为空时用 ID 本身）
+					var chunkPath string
+					if name, ok := nameMap[chunkID]; ok {
+						chunkPath = prefix + name + "." + hash + ".js"
+					} else {
+						chunkPath = prefix + chunkID + "." + hash + ".js"
+					}
+					result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
+						URL:      chunkPath,
+						FromURL:  input.SourceURL,
+						IsInline: false,
+					})
+				}
+			}
+		}
+
 		// 提取 __webpack_require__.u 函数中的直接路径映射
 		// 匹配: ===id?"path.js" 模式（如 740===e?"path.js"）
 		directPathRe := regexp.MustCompile(`(\d+)===e\?"([^"]+\.js)"`)
