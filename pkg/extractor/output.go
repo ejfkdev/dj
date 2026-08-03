@@ -17,10 +17,12 @@ const (
 
 // OutputResult 输出结果结构
 type OutputResult struct {
-	Summary   Summary    `json:"summary"`
-	JSURLs    []string   `json:"jsURLs"`
-	CacheBase string     `json:"cacheBase,omitempty"`
-	CacheDirs *CacheDirs `json:"cacheDirs,omitempty"`
+	Summary    Summary    `json:"summary"`
+	JSURLs     []string   `json:"jsURLs"`
+	CacheBase  string     `json:"cacheBase,omitempty"`
+	CacheDirs  *CacheDirs `json:"cacheDirs,omitempty"`
+	OutputDir  string     `json:"outputDir,omitempty"`
+	OutputDirs *CacheDirs `json:"outputDirs,omitempty"`
 }
 
 // Summary 统计摘要
@@ -117,6 +119,23 @@ func formatMD(result *OutputResult) string {
 		}
 	}
 
+	// -o 输出目录（与缓存目录平级，不带域名层级）
+	if result.OutputDirs != nil {
+		sb.WriteString("\n## Output Directories\n")
+		if result.OutputDirs.HTML != "" {
+			sb.WriteString(fmt.Sprintf("- **html**: %s\n", result.OutputDirs.HTML))
+		}
+		if result.OutputDirs.JS != "" {
+			sb.WriteString(fmt.Sprintf("- **js**: %s\n", result.OutputDirs.JS))
+		}
+		if result.OutputDirs.SourceMap != "" {
+			sb.WriteString(fmt.Sprintf("- **sourceMap**: %s\n", result.OutputDirs.SourceMap))
+		}
+		if result.OutputDirs.Source != "" {
+			sb.WriteString(fmt.Sprintf("- **sources**: %s\n", result.OutputDirs.Source))
+		}
+	}
+
 	return sb.String()
 }
 
@@ -148,6 +167,16 @@ func FormatTextSummary(result *OutputResult) string {
 		}
 		if result.CacheDirs.Source != "" {
 			sb.WriteString(fmt.Sprintf("Sources dir: %s\n", result.CacheDirs.Source))
+		}
+	}
+
+	// -o 输出目录
+	if result.OutputDirs != nil {
+		if result.OutputDirs.SourceMap != "" {
+			sb.WriteString(fmt.Sprintf("Output source map dir: %s\n", result.OutputDirs.SourceMap))
+		}
+		if result.OutputDirs.Source != "" {
+			sb.WriteString(fmt.Sprintf("Output sources dir: %s\n", result.OutputDirs.Source))
 		}
 	}
 

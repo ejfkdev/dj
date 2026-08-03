@@ -1853,6 +1853,23 @@ func (p *Pipeline) GetOutputResult() *OutputResult {
 			result.CacheDirs.Source = sourcesPath
 			result.Summary.SourceCount = sourceCnt
 		}
+
+		// -o 输出目录（不带域名层级，与缓存目录平级）
+		if p.cacheConfig.OutputDir != "" {
+			result.OutputDir = p.cacheConfig.OutputDir
+			result.OutputDirs = &CacheDirs{
+				JS:   filepath.Join(p.cacheConfig.OutputDir, "js"),
+				HTML: filepath.Join(p.cacheConfig.OutputDir, "html", "web.html"),
+			}
+			outSMPath := filepath.Join(p.cacheConfig.OutputDir, "source_map")
+			if smCnt := countFilesInDir(outSMPath); smCnt > 0 {
+				result.OutputDirs.SourceMap = outSMPath
+			}
+			outSourcesPath := filepath.Join(p.cacheConfig.OutputDir, "sources")
+			if srcCnt := countFilesInDirRecursive(outSourcesPath); srcCnt > 0 {
+				result.OutputDirs.Source = outSourcesPath
+			}
+		}
 	}
 
 	return result

@@ -75,8 +75,12 @@ dj -f md https://example.com
 | `--cache` | 启用缓存（默认启用） |
 | `--cache=false` | 禁用缓存读取（下载的文件仍会保存到磁盘） |
 | `--useragent=<UA>` | 自定义 User-Agent |
-| `--proxy=<URL>` | 代理地址（http/https/socks5），优先级高于环境变量 |
+| `--ua=<UA>` | `--useragent` 的短别名 |
+| `-x <URL>` | 代理地址（http/https/socks5），优先级高于环境变量 |
 | `--cookie=<cookies>` | 注入 Cookie 绕过 Cloudflare（如 `"cf_clearance=xxx"`） |
+| `-H <K: V>` | 自定义 HTTP 请求头，可重复指定（curl 风格） |
+| `-o <dir>` | 输出目录（将所有文件保存一份到此目录：js/、html/、source_map/、sources/，不含站点子目录） |
+| `-t <secs>` | 整体超时秒数（默认 120） |
 | `-h` | 显示帮助信息 |
 
 ### 示例
@@ -88,8 +92,8 @@ dj --useragent="Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) ..." http
 # 使用 HTTP 代理
 dj --proxy="http://127.0.0.1:7890" https://example.com
 
-# 使用 SOCKS5 代理
-dj --proxy="socks5://127.0.0.1:1080" https://example.com
+# 使用 SOCKS5 代理（短参数 -x）
+dj -x socks5://127.0.0.1:1080 https://example.com
 
 # 使用 HTTPS 代理
 dj --proxy="https://proxy.example.com:443" https://example.com
@@ -108,6 +112,15 @@ dj --cookie="cf_clearance=xxx" https://example.com
 
 # 启用调试模式
 dj --debug https://example.com
+
+# 保存到自定义输出目录（不含站点子目录）
+dj -o ./output https://example.com
+
+# 设置整体超时秒数（默认 120）
+dj -t 300 https://example.com
+
+# 组合使用：全新扫描、输出到指定目录、带代理和超时
+dj --cache=false -o ./output -x socks5://127.0.0.1:1080 -t 300 https://example.com
 ```
 
 ### 测试网站
@@ -155,6 +168,21 @@ dj https://demo.1panel.cn
 - 从 `meta.json` 加载之前发现的 JS URL 列表
 - 从本地缓存恢复 source map 和源码
 - 使用 `--cache=false` 可强制全量重新扫描（文件仍会保存到磁盘，只是不从缓存读取）
+
+### 输出目录
+
+使用 `-o/--output` 可将所有文件额外保存一份到指定目录（不含站点子目录层级）：
+
+```
+<output_dir>/
+├── js/                    # 下载的 JS 文件
+├── source_map/            # Source Map 文件
+├── sources/               # 还原的原始源码（保留目录结构）
+├── html/                  # 原始 HTML
+└── meta.json             # 站点元数据
+```
+
+缓存目录始终正常写入；`-o` 是在缓存基础上额外写一份副本。
 
 支持的动态加载模式和框架（共 16 个插件）：
 

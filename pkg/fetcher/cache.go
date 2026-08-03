@@ -16,12 +16,33 @@ type CacheConfig struct {
 	// WriteEnabled 控制"写入"行为。--cache=false 时 Enable=false 但 WriteEnabled=true，
 	// 即每次都走网络下载（不读缓存），但下载后仍保存到磁盘。
 	WriteEnabled bool
+	// OutputDir 非空时，所有 Save 操作额外写一份到此目录（不带域名层级）。
+	// 用途: -o/--output 选项，将文件导出到用户指定目录。
+	OutputDir string
 }
 
 // CanWrite 返回是否允许写入缓存（Enable 模式或 save-only 模式均允许）。
 // 用于统一守卫所有 Save 操作：只要允许写入就执行。
 func (c *CacheConfig) CanWrite() bool {
 	return c.Enable || c.WriteEnabled
+}
+
+// writeFileOutput 在 OutputDir 非空时，将内容额外写入一份到输出目录（不带域名层级）。
+// 用于 -o/--output 选项：缓存目录正常写一份（带域名层级），输出目录再写一份（无域名层级）。
+// subDir: "js"、"html"、"source_map" 等子目录名。
+// urlPath: 文件在 subDir 下的相对路径（经 NormalizePathForFile 拍平）。
+// content: 文件内容。
+func (c *CacheConfig) writeFileOutput(subDir, urlPath string, content []byte) {
+	if c.OutputDir == "" {
+		return
+	}
+	normalizedPath := NormalizePathForFile(urlPath)
+	outPath := filepath.Join(c.OutputDir, subDir, normalizedPath)
+	dir := filepath.Dir(outPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return
+	}
+	os.WriteFile(outPath, content, 0644)
 }
 
 // GetTempDir 获取临时目录
@@ -115,6 +136,9 @@ func (c *CacheConfig) SaveToCache(baseURL, subDir, urlPath string, content []byt
 		return fmt.Errorf("write file failed: %w", err)
 	}
 
+	// -o 输出目录：额外写一份（不带域名层级）
+	c.writeFileOutput(subDir, urlPath, content)
+
 	return nil
 }
 
@@ -146,6 +170,15 @@ func (c *CacheConfig) SaveMetadata(baseURL, urlPath string, metadata []byte) err
 	// 写入文件
 	if err := os.WriteFile(cachePath, metadata, 0644); err != nil {
 		return fmt.Errorf("write file failed: %w", err)
+	}
+
+	// -o 输出目录：额外写一份（不带域名层级）
+	if c.OutputDir != "" {
+		if urlPath == "" {
+			c.writeFileOutput("", "meta.json", metadata)
+		} else {
+			c.writeFileOutput("metadata", urlPath+".json", metadata)
+		}
 	}
 
 	return nil
@@ -202,6 +235,9 @@ func (c *CacheConfig) SaveDataURI(baseURL, urlPath, dataURI string) (string, []b
 		return "", nil, fmt.Errorf("write file failed: %w", err)
 	}
 
+	// -o 输出目录：额外写一份（不带域名层级）
+	c.writeFileOutput("source_map", urlPath+".map", content)
+
 	return mapPath, content, nil
 }
 
@@ -246,6 +282,15 @@ func (c *CacheConfig) SaveSourceFile(baseURL, sourcePath string, content []byte)
 
 	if err := os.WriteFile(fullPath, content, 0644); err != nil {
 		return "", fmt.Errorf("write file failed: %w", err)
+	}
+
+	// -o 输出目录：额外写一份（不带域名层级，保留 sources 目录树）
+	if c.OutputDir != "" {
+		outPath := filepath.Join(c.OutputDir, "sources", cleanPath)
+		outDir := filepath.Dir(outPath)
+		if err := os.MkdirAll(outDir, 0755); err == nil {
+			os.WriteFile(outPath, content, 0644)
+		}
 	}
 
 	return fullPath, nil

@@ -75,8 +75,12 @@ dj -f md https://example.com
 | `--cache` | Enable caching (enabled by default) |
 | `--cache=false` | Disable cache reads (still saves downloaded files to disk) |
 | `--useragent=<UA>` | Custom User-Agent string |
-| `--proxy=<URL>` | Proxy URL (http/https/socks5), overrides environment variables |
+| `--ua=<UA>` | Short alias for `--useragent` |
+| `-x <URL>` | Proxy URL (http/https/socks5), overrides environment variables |
 | `--cookie=<cookies>` | Cookies for bypassing Cloudflare (e.g., `"cf_clearance=xxx"`) |
+| `-H <K: V>` | Custom HTTP header, repeatable (curl-style) |
+| `-o <dir>` | Output directory (saves a copy of all files: js/, html/, source_map/, sources/) without site subdir |
+| `-t <secs>` | Overall timeout in seconds (default: 120) |
 | `-h` | Show help information |
 
 ### Examples
@@ -88,8 +92,8 @@ dj --useragent="Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) ..." http
 # Use HTTP proxy
 dj --proxy="http://127.0.0.1:7890" https://example.com
 
-# Use SOCKS5 proxy
-dj --proxy="socks5://127.0.0.1:1080" https://example.com
+# Use SOCKS5 proxy (short form -x)
+dj -x socks5://127.0.0.1:1080 https://example.com
 
 # Use HTTPS proxy
 dj --proxy="https://proxy.example.com:443" https://example.com
@@ -108,6 +112,15 @@ dj --cookie="cf_clearance=xxx" https://example.com
 
 # Enable debug mode
 dj --debug https://example.com
+
+# Save files to a custom output directory (without site subdir)
+dj -o ./output https://example.com
+
+# Set overall timeout (default: 120 seconds)
+dj -t 300 https://example.com
+
+# Combine: fresh scan, save to output dir, with proxy and timeout
+dj --cache=false -o ./output -x socks5://127.0.0.1:1080 -t 300 https://example.com
 ```
 
 ### Tested websites
@@ -230,6 +243,19 @@ Cache structure:
 ├── html/                  # Original HTML
 └── meta.json             # Site metadata (JS URLs, source map paths, restored sources, cache dirs)
 ```
+
+With `-o/--output`, files are also written to the specified directory **without** the `<origin>` subdirectory level:
+
+```
+<output_dir>/
+├── js/
+├── source_map/
+├── sources/
+├── html/
+└── meta.json
+```
+
+The cache directory is always written normally; `-o` adds a second copy.
 
 ## FAQ
 

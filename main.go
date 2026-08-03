@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,7 @@ import (
 )
 
 var version = "dev" // 版本号，通过 -ldflags "-X main.version=x.x.x" 设置
+var outputDir string // -o/--output 输出目录（包级变量，printHelp 需要访问）
 
 // parseFormat 输出格式字符串转换为内部常量
 func parseFormat(s string) (extractor.OutputFormat, bool) {
@@ -41,25 +43,36 @@ func printHelp() {
 	fmt.Printf("      --cache=false        disable cache reads (still saves to disk)\n")
 	fmt.Printf("      --useragent <UA>     custom User-Agent string (non-ASCII supported)\n")
 	fmt.Printf("      --ua <UA>            short alias for --useragent\n")
-	fmt.Printf("      --proxy <URL>        proxy URL: http://, https://, socks5://\n")
+	fmt.Printf("  -x, --proxy <URL>        proxy URL: http://, https://, socks5://\n")
 	fmt.Printf("      --cookie <cookies>   cookies for bypassing Cloudflare\n")
 	fmt.Printf("  -H, --header <K: V>      custom HTTP header, repeatable (curl-style, non-ASCII supported)\n")
+	fmt.Printf("  -o, --output <dir>       output directory (saves a copy without site subdir)\n")
+	fmt.Printf("  -t, --timeout <secs>     overall timeout in seconds (default: 120)\n")
 	fmt.Printf("  -h, --help               show this help\n\n")
 	fmt.Printf("Notes:\n")
 	fmt.Printf("  - URL is the first non-flag argument; flags can appear before or after it\n")
 	fmt.Printf("  - Flag values can be passed as --flag=value or as the next argument\n")
 	fmt.Printf("  - --header can be specified multiple times; later values override earlier ones\n")
-	fmt.Printf("  - --header overrides default browser headers (e.g. User-Agent, Accept)\n\n")
+	fmt.Printf("  - --header overrides default browser headers (e.g. User-Agent, Accept)\n")
+	fmt.Printf("  - -o saves a copy of all files to the output dir (js/, html/, source_map/, sources/)\n")
+	fmt.Printf("    without the site subdirectory level; cache dir is still written normally\n\n")
 	fmt.Printf("Examples:\n")
 	fmt.Printf("  dj https://example.com\n")
 	fmt.Printf("  dj -f md https://example.com\n")
 	fmt.Printf("  dj --debug --cache=false https://example.com\n")
 	fmt.Printf("  dj --useragent='Mozilla/5.0 ...' https://example.com\n")
-	fmt.Printf("  dj --proxy=socks5://127.0.0.1:7890 https://example.com\n")
+	fmt.Printf("  dj -x socks5://127.0.0.1:7890 https://example.com\n")
 	fmt.Printf("  dj -f json --cookie 'cf_clearance=xxx; key=val' https://example.com\n")
 	fmt.Printf("  dj -H 'Referer: https://google.com' -H 'X-Token: abc' https://example.com\n")
+	fmt.Printf("  dj -o ./output https://example.com\n")
+	fmt.Printf("  dj -t 300 https://example.com\n")
+	fmt.Printf("  dj --cache=false -o ./output -x socks5://127.0.0.1:1080 -t 300 https://example.com\n")
 	fmt.Printf("  dj https://example.com -f md --debug\n\n")
-	fmt.Printf("Cache path: %s\n", fetcher.GetTempDir())
+	if outputDir != "" {
+		fmt.Printf("Cache path: %s\nOutput path: %s\n", fetcher.GetTempDir(), outputDir)
+	} else {
+		fmt.Printf("Cache path: %s\n", fetcher.GetTempDir())
+	}
 }
 
 func main() {
@@ -72,7 +85,8 @@ func main() {
 	var proxy string
 	var cookie string
 	var url string
-	var rawHeaders []string // 收集所有 -H/--header 值，最后一次性解析
+	var rawHeaders []string    // 收集所有 -H/--header 值，最后一次性解析
+	var timeoutSecs int = 120  // -t/--timeout 整体超时秒数（替代原硬编码 30s）
 
 	// 取下一段参数值（支持 --flag value 和 --flag=value 两种形式）
 	nextValue := func(i *int) (string, bool) {
@@ -143,7 +157,7 @@ func main() {
 				}
 			}
 			userAgent = val
-		case name == "--proxy":
+		case name == "--proxy" || name == "-x":
 			if val == "" {
 				if v, ok := nextValue(&i); ok {
 					val = v
@@ -163,6 +177,31 @@ func main() {
 				}
 			}
 			cookie = val
+		case name == "--output" || name == "-o":
+			if val == "" {
+				if v, ok := nextValue(&i); ok {
+					val = v
+				} else {
+					fmt.Fprintln(os.Stderr, "missing value for --output/-o")
+					os.Exit(1)
+				}
+			}
+			outputDir = val
+		case name == "--timeout" || name == "-t":
+			if val == "" {
+				if v, ok := nextValue(&i); ok {
+					val = v
+				} else {
+					fmt.Fprintln(os.Stderr, "missing value for --timeout/-t")
+					os.Exit(1)
+				}
+			}
+			n, err := strconv.Atoi(val)
+			if err != nil || n <= 0 {
+				fmt.Fprintf(os.Stderr, "invalid --timeout value: %q\n", val)
+				os.Exit(1)
+			}
+			timeoutSecs = n
 		case name == "--header" || name == "-H":
 			if val == "" {
 				if v, ok := nextValue(&i); ok {
@@ -263,11 +302,12 @@ func main() {
 		Enable:       enableCache,
 		WriteEnabled: !enableCache, // cache=false 时仍写磁盘
 		BaseDir:      fetcher.GetTempDir(),
+		OutputDir:    outputDir, // -o 指定时额外写一份到该目录（不带域名层级）
 	}
 	pipeline.SetCacheConfig(cacheConfig)
 
 	// 执行
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSecs)*time.Second)
 	defer cancel()
 
 	// text 模式：实时输出；json/md 模式：收集后统一输出

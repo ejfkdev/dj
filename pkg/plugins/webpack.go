@@ -92,6 +92,9 @@ type WebpackPlugin struct {
 	fallbackRe *regexp.Regexp
 	// ID -> value 正则
 	idValueRe *regexp.Regexp
+	// 通用字符串 key -> hex hash 映射正则（用于 webpackRequireUChunkPatternRe 回退）
+	// 匹配 "任意字符串key":"hexhash" 格式，覆盖 chunk-xxx、noprefetch-xxx、vendors~xxx 等
+	stringKeyHashMapRe *regexp.Regexp
 	// js/ 前缀正则
 	jsPrefixRe *regexp.Regexp
 	// 查询参数后缀正则
@@ -180,6 +183,10 @@ func NewWebpackPlugin() *WebpackPlugin {
 		fallbackRe: regexp.MustCompile(`\+\s*["']([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+/)["']`),
 		// ID -> value 正则
 		idValueRe: regexp.MustCompile(`(\d+):"([^"]+)"`),
+		// 通用字符串 key -> hex hash 映射（hex 值 5-20 位）
+		// 用于 webpackRequireUChunkPatternRe 回退：当 idValueRe 提取不到数字 key 时，
+		// 用此正则提取所有字符串 key 的 hash 映射（chunk-xxx、noprefetch-xxx、vendors~xxx 等）
+		stringKeyHashMapRe: regexp.MustCompile(`"([a-zA-Z][a-zA-Z0-9_~\-]+)":"([a-f0-9]{5,20})"`),
 		// js/ 前缀正则
 		jsPrefixRe: regexp.MustCompile(`\+\s*["'](\w+/)["']`),
 		// 查询参数后缀正则
@@ -426,13 +433,13 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 		}
 
 		// 回退：当 idValueRe（数字 key）未提取到 hash 映射时，
-		// 尝试用 stringChunkHashMapRe 提取字符串 key（如 "chunk-21d8d700":"f24ace7c"）的映射。
-		// 场景: webpack 4 inline runtime 中 chunk ID 是字符串格式而非数字
+		// 用 stringKeyHashMapRe 提取所有字符串 key 的 hash 映射。
+		// 场景: webpack 4 inline runtime 中 chunk ID 是字符串格式（chunk-xxx、noprefetch-xxx、vendors~xxx）
 		if len(hashMap) == 0 {
-			for _, sm := range p.stringChunkHashMapRe.FindAllStringSubmatch(content, -1) {
+			for _, sm := range p.stringKeyHashMapRe.FindAllStringSubmatch(content, -1) {
 				if len(sm) > 2 {
-					chunkID := sm[1] // "chunk-21d8d700"
-					hash := sm[2]    // "f24ace7c"
+					chunkID := sm[1] // "chunk-21d8d700" 或 "noprefetch-xxx" 或 "vendors~xxx"
+					hash := sm[2]   // "f24ace7c"
 					if _, exists := hashMap[chunkID]; exists {
 						continue
 					}
