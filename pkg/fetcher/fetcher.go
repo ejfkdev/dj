@@ -199,8 +199,8 @@ func (f *Fetcher) newRequest(rawURL string) (*http.Request, error) {
 }
 
 // setHeaderValue 设置请求头值，绕过 ASCII 校验以便支持非 ASCII 值
-// Go 的 http.Header.Set 强制 ASCII，遇到中文会拒绝。某些站点会校验 UA 字符集
-// （如 "custom UA string"），这种场景下需要直接写到 header map。
+// Go 的 http.Header.Set 强制 ASCII，遇到中文会拒绝。某些站点会校验 UA 字符集，
+// 这种场景下需要直接写到 header map。
 func setHeaderValue(req *http.Request, key, value string) {
 	if value == "" {
 		req.Header.Set(key, value)
