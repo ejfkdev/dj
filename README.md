@@ -20,7 +20,7 @@
 - Support for multiple frontend framework chunk mappings: Next.js, Nuxt.js, Vite, SvelteKit, Webpack, and more
 - Automatic Source Map discovery and **original source code restoration** (from `sourcesContent`, with `mappings` VLQ fallback)
 - **Cache reuse**: second run on the same site restores results from local cache with zero network requests
-- TLS fingerprint spoofing (uTLS Chrome fingerprint) to bypass Cloudflare and other WAFs
+- TLS fingerprint spoofing with **randomized browser fingerprints** (Chrome, Firefox, Safari, Edge, iOS) to bypass Cloudflare and other WAFs
 - HTTP/2 and HTTP/1.1 protocol auto-negotiation
 - SOCKS5/HTTP/HTTPS proxy support with authentication
 - Environment variable proxy configuration (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, etc.)
@@ -79,6 +79,7 @@ dj -f md https://example.com
 | `-x <URL>` | Proxy URL (http/https/socks5), overrides environment variables |
 | `--cookie=<cookies>` | Cookies for bypassing Cloudflare (e.g., `"cf_clearance=xxx"`) |
 | `-H <K: V>` | Custom HTTP header, repeatable (curl-style) |
+| `--no-random-tls` | Disable randomized TLS fingerprint (use fixed Chrome) |
 | `-o <dir>` | Output directory (saves a copy of all files: js/, html/, source_map/, sources/) without site subdir |
 | `-t <secs>` | Overall timeout in seconds (default: 120) |
 | `-h` | Show help information |

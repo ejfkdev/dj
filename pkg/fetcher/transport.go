@@ -49,10 +49,10 @@ type multiTransport struct {
 }
 
 // newMultiTransport 创建多协议传输
-func newMultiTransport(proxyURL *url.URL) *multiTransport {
+func newMultiTransport(proxyURL *url.URL, fpMode TLSFingerprintMode) *multiTransport {
 	return &multiTransport{
-		h2Transport: newH2Transport(proxyURL),
-		h1Transport: newH1Transport(proxyURL),
+		h2Transport: newH2Transport(proxyURL, fpMode),
+		h1Transport: newH1Transport(proxyURL, fpMode),
 		cache:       newProtocolCache(),
 	}
 }

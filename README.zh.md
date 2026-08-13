@@ -20,7 +20,7 @@
 - 支持多种前端框架的 chunk 映射：Next.js、Nuxt.js、Vite、SvelteKit、Webpack 等
 - 自动发现 Source Map 并**还原原始源码**（优先 sourcesContent，缺失时用 mappings VLQ 回退）
 - **缓存复用**：第二次运行同一站点时从本地缓存恢复，零网络请求
-- TLS 指纹伪装（uTLS Chrome 指纹），绕过 Cloudflare 等 WAF
+- TLS 指纹伪装，**随机化浏览器指纹**（Chrome、Firefox、Safari、Edge、iOS），绕过 Cloudflare 等 WAF
 - HTTP/2 和 HTTP/1.1 协议自动协商
 - SOCKS5/HTTP/HTTPS 代理支持，支持认证
 - 环境变量代理配置（`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 等）
@@ -79,6 +79,7 @@ dj -f md https://example.com
 | `-x <URL>` | 代理地址（http/https/socks5），优先级高于环境变量 |
 | `--cookie=<cookies>` | 注入 Cookie 绕过 Cloudflare（如 `"cf_clearance=xxx"`） |
 | `-H <K: V>` | 自定义 HTTP 请求头，可重复指定（curl 风格） |
+| `--no-random-tls` | 关闭随机化 TLS 指纹（使用固定 Chrome 指纹） |
 | `-o <dir>` | 输出目录（将所有文件保存一份到此目录：js/、html/、source_map/、sources/，不含站点子目录） |
 | `-t <secs>` | 整体超时秒数（默认 120） |
 | `-h` | 显示帮助信息 |

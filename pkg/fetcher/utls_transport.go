@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -38,6 +39,25 @@ func (w *utlsConnWrapper) ConnectionState() tls.ConnectionState {
 		OCSPResponse:                cs.OCSPResponse,
 		TLSUnique:                   cs.TLSUnique,
 	}
+}
+
+// browserFingerprints 真实浏览器 TLS 指纹池，用于随机化 JA3/JA4 指纹。
+// 每次连接从中随机选取一个，使 TLS 指纹不固定。
+var browserFingerprints = []utls.ClientHelloID{
+	utls.HelloChrome_Auto,
+	utls.HelloFirefox_Auto,
+	utls.HelloSafari_Auto,
+	utls.HelloEdge_Auto,
+	utls.HelloIOS_Auto,
+}
+
+// pickClientHelloID 根据指纹模式选择 ClientHelloID。
+// random 模式从浏览器指纹池中随机选取；chrome 模式固定 Chrome。
+func pickClientHelloID(mode TLSFingerprintMode) utls.ClientHelloID {
+	if mode == TLSFingerprintChrome {
+		return utls.HelloChrome_Auto
+	}
+	return browserFingerprints[rand.Intn(len(browserFingerprints))]
 }
 
 // proxyFromEnvironment 从环境变量解析代理 URL
@@ -111,18 +131,18 @@ func resolveProxy(proxyURL *url.URL, targetAddr string) *url.URL {
 }
 
 // newH2Transport 创建 HTTP/2 传输，使用 uTLS 指纹伪装
-func newH2Transport(proxyURL *url.URL) *http2.Transport {
+func newH2Transport(proxyURL *url.URL, fpMode TLSFingerprintMode) *http2.Transport {
 	return &http2.Transport{
 		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
 			p := resolveProxy(proxyURL, addr)
-			return dialUTLS(ctx, network, addr, p, []string{"h2", "http/1.1"})
+			return dialUTLS(ctx, network, addr, p, []string{"h2", "http/1.1"}, fpMode)
 		},
 		AllowHTTP: false,
 	}
 }
 
 // newH1Transport 创建 HTTP/1.1 传输，使用 uTLS 指纹伪装
-func newH1Transport(proxyURL *url.URL) *http.Transport {
+func newH1Transport(proxyURL *url.URL, fpMode TLSFingerprintMode) *http.Transport {
 	transport := &http.Transport{
 		MaxIdleConns:        2000,
 		MaxIdleConnsPerHost: 1000,
@@ -132,14 +152,15 @@ func newH1Transport(proxyURL *url.URL) *http.Transport {
 
 	transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		p := resolveProxy(proxyURL, addr)
-		return dialUTLS(ctx, network, addr, p, []string{"http/1.1"})
+		return dialUTLS(ctx, network, addr, p, []string{"http/1.1"}, fpMode)
 	}
 
 	return transport
 }
 
-// dialUTLS 建立 uTLS 连接，可选通过代理
-func dialUTLS(ctx context.Context, network, addr string, proxyURL *url.URL, alpnProtos []string) (net.Conn, error) {
+// dialUTLS 建立 uTLS 连接，可选通过代理。
+// fpMode 控制指纹模式：随机模式下每次连接从浏览器指纹池随机选取。
+func dialUTLS(ctx context.Context, network, addr string, proxyURL *url.URL, alpnProtos []string, fpMode TLSFingerprintMode) (net.Conn, error) {
 	var rawConn net.Conn
 	var err error
 
@@ -162,7 +183,9 @@ func dialUTLS(ctx context.Context, network, addr string, proxyURL *url.URL, alpn
 		host = addr
 	}
 
-	spec, err := utls.UTLSIdToSpec(utls.HelloChrome_Auto)
+	// 根据指纹模式选择 ClientHelloID（随机模式每次连接不同）
+	helloID := pickClientHelloID(fpMode)
+	spec, err := utls.UTLSIdToSpec(helloID)
 	if err != nil {
 		rawConn.Close()
 		return nil, fmt.Errorf("uTLS spec error: %w", err)

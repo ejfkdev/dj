@@ -439,7 +439,7 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 			for _, sm := range p.stringKeyHashMapRe.FindAllStringSubmatch(content, -1) {
 				if len(sm) > 2 {
 					chunkID := sm[1] // "chunk-21d8d700" 或 "noprefetch-xxx" 或 "vendors~xxx"
-					hash := sm[2]   // "f24ace7c"
+					hash := sm[2]    // "f24ace7c"
 					if _, exists := hashMap[chunkID]; exists {
 						continue
 					}

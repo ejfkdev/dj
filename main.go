@@ -15,7 +15,7 @@ import (
 	"github.com/ejfkdev/dj/pkg/plugins"
 )
 
-var version = "dev" // 版本号，通过 -ldflags "-X main.version=x.x.x" 设置
+var version = "dev"  // 版本号，通过 -ldflags "-X main.version=x.x.x" 设置
 var outputDir string // -o/--output 输出目录（包级变量，printHelp 需要访问）
 
 // parseFormat 输出格式字符串转换为内部常量
@@ -46,6 +46,7 @@ func printHelp() {
 	fmt.Printf("  -x, --proxy <URL>        proxy URL: http://, https://, socks5://\n")
 	fmt.Printf("      --cookie <cookies>   cookies for bypassing Cloudflare\n")
 	fmt.Printf("  -H, --header <K: V>      custom HTTP header, repeatable (curl-style, non-ASCII supported)\n")
+	fmt.Printf("      --no-random-tls      disable randomized TLS fingerprint (use fixed Chrome)\n")
 	fmt.Printf("  -o, --output <dir>       output directory (saves a copy without site subdir)\n")
 	fmt.Printf("  -t, --timeout <secs>     overall timeout in seconds (default: 120)\n")
 	fmt.Printf("  -h, --help               show this help\n\n")
@@ -85,8 +86,9 @@ func main() {
 	var proxy string
 	var cookie string
 	var url string
-	var rawHeaders []string    // 收集所有 -H/--header 值，最后一次性解析
-	var timeoutSecs int = 120  // -t/--timeout 整体超时秒数（替代原硬编码 30s）
+	var noRandomTLS bool      // --no-random-tls 关闭随机化 TLS 指纹
+	var rawHeaders []string   // 收集所有 -H/--header 值，最后一次性解析
+	var timeoutSecs int = 120 // -t/--timeout 整体超时秒数（替代原硬编码 30s）
 
 	// 取下一段参数值（支持 --flag value 和 --flag=value 两种形式）
 	nextValue := func(i *int) (string, bool) {
@@ -167,6 +169,8 @@ func main() {
 				}
 			}
 			proxy = val
+		case name == "--no-random-tls":
+			noRandomTLS = true
 		case name == "--cookie":
 			if val == "" {
 				if v, ok := nextValue(&i); ok {
@@ -268,12 +272,16 @@ func main() {
 	pipeline := extractor.NewPipeline(registry)
 	pipeline.Debug = debug
 
-	// 设置 Fetcher 配置（代理和 User-Agent）
+	// 设置 Fetcher 配置（代理、User-Agent 和 TLS 指纹模式）
 	ua := userAgent
 	if ua == "" {
 		ua = fetcher.DefaultUserAgent
 	}
-	pipeline.SetFetcherConfig(proxy, ua)
+	fpMode := fetcher.TLSFingerprintRandom
+	if noRandomTLS {
+		fpMode = fetcher.TLSFingerprintChrome
+	}
+	pipeline.SetFetcherConfig(proxy, ua, fpMode)
 
 	// 注入 cookie（用于绕过 Cloudflare 等防护）
 	if cookie != "" {

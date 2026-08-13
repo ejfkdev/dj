@@ -110,11 +110,12 @@ func (p *Pipeline) SetCacheConfig(cfg *fetcher.CacheConfig) {
 	p.cacheConfig = cfg
 }
 
-// SetFetcherConfig 设置 Fetcher 配置（代理和 User-Agent）
-func (p *Pipeline) SetFetcherConfig(proxy, userAgent string) {
+// SetFetcherConfig 设置 Fetcher 配置（代理、User-Agent 和 TLS 指纹模式）
+func (p *Pipeline) SetFetcherConfig(proxy, userAgent string, fpMode fetcher.TLSFingerprintMode) {
 	f, err := fetcher.NewFetcherWithConfig(fetcher.FetcherConfig{
-		Proxy:   proxy,
-		UseUTLS: true,
+		Proxy:          proxy,
+		UseUTLS:        true,
+		TLSFingerprint: fpMode,
 	})
 	if err != nil {
 		// 降级为不使用 uTLS
@@ -331,9 +332,33 @@ func (p *Pipeline) probeSourceMap(jsURL string) {
 	}
 	// 检查状态码和 Content-Type
 	if result.StatusCode >= 200 && result.StatusCode < 300 {
-		// Content-Type 不能是 text/html（服务器错误可能返回 HTML 页面）
+		// Content-Type 不能是 text/html（WAF 拦截常返回 HTML 页面）
 		contentType := strings.ToLower(result.ContentType)
 		if strings.Contains(contentType, "text/html") {
+			return
+		}
+		// 排除明显不是 source map 的类型（图片、CSS、字体等）
+		if strings.HasPrefix(contentType, "image/") ||
+			strings.HasPrefix(contentType, "text/css") ||
+			strings.HasPrefix(contentType, "font/") ||
+			strings.HasPrefix(contentType, "text/plain") {
+			return
+		}
+
+		// 下载 .map 文件内容
+		mapContent, err := p.fetcher.Fetch(mapURL)
+		if err != nil {
+			if p.Debug {
+				p.debugLog("probeSourceMap: GET failed: url=%s, err=%v", mapURL, err)
+			}
+			return
+		}
+
+		// 验证内容是否是合法的 source map（防止 WAF 拦截返回 200 HTML）
+		if !isValidSourceMapContent(mapContent) {
+			if p.Debug {
+				p.debugLog("probeSourceMap: not a valid source map, skipped: %s", mapURL)
+			}
 			return
 		}
 
@@ -350,13 +375,12 @@ func (p *Pipeline) probeSourceMap(jsURL string) {
 		}
 		p.foundChMu.Unlock()
 
-		// 下载 .map 文件内容并保存到缓存
-		mapContent, err := p.fetcher.Fetch(mapURL)
-		if err == nil {
-			p.saveSourceMapToCache(jsURL, mapContent)
-			// 从 source map 还原原始源码
-			p.restoreSourcesFromMap(jsURL, mapURL, mapContent)
-		}
+		// 标记该 JS 有 source map
+		p.knowledge.SetJSHasSourceMap(jsURL, true)
+
+		// 保存到缓存并还原原始源码
+		p.saveSourceMapToCache(jsURL, mapContent)
+		p.restoreSourcesFromMap(jsURL, mapURL, mapContent)
 	}
 }
 
@@ -559,8 +583,8 @@ func (p *Pipeline) saveDataURIToCache(sourceJSURL, dataURI string) {
 		p.debugLog("saveDataURIToCache: saved inline source map to %s", cachePath)
 	}
 
-	// 内联 source map 同样还原原始源码
-	if len(mapContent) > 0 {
+	// 内联 source map 同样验证后还原原始源码
+	if len(mapContent) > 0 && isValidSourceMapContent(mapContent) {
 		// dataURI 已包含 "data:" 前缀，直接作为 mapURL 用于日志
 		p.restoreSourcesFromMap(sourceJSURL, dataURI, mapContent)
 	}
@@ -1117,17 +1141,45 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 			if p.Debug {
 				p.debugLog("processJSContent fetch error: url=%s, err=%v", normalizedURL, err)
 			}
+			// 非 2xx 但 URL 看起来是 JS 的，仍输出 URL（用户应知道它的存在）
+			p.recordUnreachableJS(normalizedURL, discovered)
 			return
 		}
 
 		// 只处理 2xx 响应
 		if result.StatusCode < 200 || result.StatusCode >= 300 {
+			if p.Debug {
+				p.debugLog("processJSContent: non-2xx status %d: %s", result.StatusCode, normalizedURL)
+			}
+			// 非 2xx 但 URL 看起来是 JS 的，仍输出 URL
+			p.recordUnreachableJS(normalizedURL, discovered)
 			return
 		}
 
 		content = result.Content
 		contentType = p.detectContentTypeFromHeader(result.ContentType, content)
 		headers = result.Headers
+
+		// 重定向处理：如果 fetch 返回了 final URL 且与原始 URL 不同，
+		// 更新 baseURL 和 PrependURL 为 final URL，使后续相对路径拼接正确。
+		if result.FinalURL != "" && result.FinalURL != normalizedURL {
+			finalNormalized := NormalizeURL(result.FinalURL)
+			if finalNormalized != normalizedURL {
+				if p.Debug {
+					p.debugLog("processJSContent: redirect %s -> %s", normalizedURL, finalNormalized)
+				}
+				// 起始页重定向：更新 baseURL 和 PrependURL
+				if normalizedURL == p.baseURL {
+					p.baseURL = finalNormalized
+					// 更新 PrependURL 为重定向后的 origin
+					if newBase := GetBaseURL(finalNormalized); newBase != "" {
+						p.knowledge.AddPrependURL(newBase)
+					}
+				}
+				// 更新 normalizedURL 为 final URL，后续插件分析和路径拼接基于 final URL
+				normalizedURL = finalNormalized
+			}
+		}
 	}
 
 	// 如果 URL 以 .js/.mjs/.jsonp 结尾，但 Content-Type 是 HTML，直接跳过
@@ -1138,6 +1190,7 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 	// 处理 source map URL：当 .map 文件作为独立 URL 被下载时（由 SourceMapPlugin
 	// 从 JS 内容的 sourceMappingURL 发现），缓存它并还原原始源码。
 	// 这类 URL 的 Content-Type 通常是 application/json 而非 JS，不会走 JS 缓存分支。
+	// 验证内容是否合法 source map，防止 WAF 拦截返回 200 HTML 被误判。
 	if isSourceMapURL(normalizedURL) {
 		mapContent := content
 		// .map URL 本身不在 JS 缓存里，尝试从 source_map 缓存读取（按关联 JS URL 定位）
@@ -1145,6 +1198,12 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 			if cached, ok := p.loadSourceMapCache(discovered.FromURL); ok {
 				mapContent = cached
 			}
+		}
+		if !isValidSourceMapContent(mapContent) {
+			if p.Debug {
+				p.debugLog("processJSContent: not a valid source map, skipped: %s", normalizedURL)
+			}
+			return
 		}
 		p.saveSourceMapToCache(discovered.FromURL, mapContent)
 		p.restoreSourcesFromMap(discovered.FromURL, normalizedURL, mapContent)
@@ -1208,6 +1267,49 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 		if !p.knowledge.JSHasSourceMap(normalizedURL) {
 			go p.probeSourceMap(normalizedURL)
 		}
+	}
+}
+
+// recordUnreachableJS 在 JS URL 无法下载（非 2xx 或网络错误）时，
+// 仍将其加入 jsURLs 和 foundCh 输出。用户应知道该 JS URL 的存在，
+// 即使服务器拒绝访问（如反爬 418、403 等）。
+func (p *Pipeline) recordUnreachableJS(url string, discovered DiscoveredJS) {
+	// 只对看起来是 JS 的 URL 输出（避免 HTML 页面的误报）
+	if !isLikelyStaticResource(url) {
+		return
+	}
+
+	p.jsURLsMu.Lock()
+	found := false
+	for _, js := range p.jsURLs {
+		if js.URL == url {
+			found = true
+			break
+		}
+	}
+	if !found {
+		p.jsURLs = append(p.jsURLs, DiscoveredJS{
+			URL:        url,
+			FromURL:    discovered.FromURL,
+			FromPlugin: discovered.FromPlugin,
+			IsInline:   discovered.IsInline,
+		})
+	}
+	p.jsURLsMu.Unlock()
+
+	// 发送到 foundCh
+	p.foundChMu.Lock()
+	if !p.foundChSeen[url] {
+		p.foundChSeen[url] = true
+		select {
+		case p.foundCh <- url:
+		default:
+		}
+	}
+	p.foundChMu.Unlock()
+
+	if p.Debug {
+		p.debugLog("recordUnreachableJS: %s (unreachable but recorded)", url)
 	}
 }
 
@@ -1757,6 +1859,38 @@ func isSourceMapURL(urlStr string) bool {
 		path = path[:idx]
 	}
 	return strings.HasSuffix(strings.ToLower(path), ".map")
+}
+
+// isValidSourceMapContent 验证内容是否是合法的 source map JSON。
+// 用于防止 WAF 拦截返回 200 HTML/JSON 时被误判为 source map。
+// 检查项：
+//   - 内容非空且以 { 开头（排除 HTML 页面拦截）
+//   - sourcemap.Parse 成功（JSON 合法且含 sources 字段）
+func isValidSourceMapContent(content []byte) bool {
+	if len(content) == 0 {
+		return false
+	}
+	// 快速排除：HTML 页面拦截（WAF 常见行为）
+	trimmed := strings.TrimSpace(string(content[:min(len(content), 200)]))
+	if strings.HasPrefix(trimmed, "<!DOCTYPE") || strings.HasPrefix(trimmed, "<html") ||
+		strings.HasPrefix(trimmed, "<") {
+		return false
+	}
+	// source map 必须是 JSON 对象
+	if !strings.HasPrefix(trimmed, "{") {
+		return false
+	}
+	// 最终验证：尝试解析
+	_, err := sourcemap.Parse(content)
+	return err == nil
+}
+
+// min 返回两个整数中的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // detectContentTypeFromHeader 优先从 HTTP 响应头检测 Content-Type

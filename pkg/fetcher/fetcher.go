@@ -30,10 +30,21 @@ const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 // chromeSecChUA 与 DefaultUserAgent 对应的 Sec-CH-UA 值
 const chromeSecChUA = `"Chromium";v="148", "Google Chrome";v="148", "Not-A.Brand";v="99"`
 
+// TLSFingerprintMode 控制 uTLS 指纹模式
+type TLSFingerprintMode int
+
+const (
+	// TLSFingerprintRandom 随机选择真实浏览器指纹（默认）
+	TLSFingerprintRandom TLSFingerprintMode = iota
+	// TLSFingerprintChrome 固定使用 Chrome 指纹
+	TLSFingerprintChrome
+)
+
 // FetcherConfig Fetcher 配置
 type FetcherConfig struct {
-	Proxy   string // 代理 URL (http/https/socks5)
-	UseUTLS bool   // 启用 uTLS TLS 指纹伪装
+	Proxy          string             // 代理 URL (http/https/socks5)
+	UseUTLS        bool               // 启用 uTLS TLS 指纹伪装
+	TLSFingerprint TLSFingerprintMode // uTLS 指纹模式（随机/Chrome）
 }
 
 // FetchResult 包含内容和状态码
@@ -42,6 +53,7 @@ type FetchResult struct {
 	StatusCode  int
 	ContentType string
 	Headers     http.Header // HTTP 响应头
+	FinalURL    string      // 重定向后的最终 URL（与原始 URL 相同时为空）
 }
 
 // Fetcher HTTP 下载器
@@ -81,7 +93,7 @@ func NewFetcherWithConfig(cfg FetcherConfig) (*Fetcher, error) {
 	}
 
 	if cfg.UseUTLS {
-		transport = newMultiTransport(proxyURL)
+		transport = newMultiTransport(proxyURL, cfg.TLSFingerprint)
 	} else {
 		stdTransport := &http.Transport{
 			MaxIdleConns:        2000,
@@ -319,11 +331,22 @@ func (f *Fetcher) FetchWithStatus(rawURL string) (*FetchResult, error) {
 		return nil, err
 	}
 
+	// 获取重定向后的最终 URL
+	finalURL := ""
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+		// 如果 final URL 与原始 URL 相同，置空以避免不必要的处理
+		if finalURL == rawURL {
+			finalURL = ""
+		}
+	}
+
 	return &FetchResult{
 		Content:     content,
 		StatusCode:  resp.StatusCode,
 		ContentType: resp.Header.Get("Content-Type"),
 		Headers:     resp.Header,
+		FinalURL:    finalURL,
 	}, nil
 }
 
