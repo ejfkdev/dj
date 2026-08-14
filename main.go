@@ -39,8 +39,7 @@ func printHelp() {
 	fmt.Printf("Options:\n")
 	fmt.Printf("  -d, --debug              enable debug output\n")
 	fmt.Printf("  -f, --format <fmt>       output format: text | json | md (default: text)\n")
-	fmt.Printf("      --cache              enable cache (default: on)\n")
-	fmt.Printf("      --cache=false        disable cache reads (still saves to disk)\n")
+	fmt.Printf("      --no-cache           disable cache reads (still saves to disk)\n")
 	fmt.Printf("      --useragent <UA>     custom User-Agent string (non-ASCII supported)\n")
 	fmt.Printf("      --ua <UA>            short alias for --useragent\n")
 	fmt.Printf("  -x, --proxy <URL>        proxy URL: http://, https://, socks5://\n")
@@ -60,14 +59,14 @@ func printHelp() {
 	fmt.Printf("Examples:\n")
 	fmt.Printf("  dj https://example.com\n")
 	fmt.Printf("  dj -f md https://example.com\n")
-	fmt.Printf("  dj --debug --cache=false https://example.com\n")
+	fmt.Printf("  dj --debug --no-cache https://example.com\n")
 	fmt.Printf("  dj --useragent='Mozilla/5.0 ...' https://example.com\n")
 	fmt.Printf("  dj -x socks5://127.0.0.1:7890 https://example.com\n")
 	fmt.Printf("  dj -f json --cookie 'cf_clearance=xxx; key=val' https://example.com\n")
 	fmt.Printf("  dj -H 'Referer: https://google.com' -H 'X-Token: abc' https://example.com\n")
 	fmt.Printf("  dj -o ./output https://example.com\n")
 	fmt.Printf("  dj -t 60 https://example.com\n")
-	fmt.Printf("  dj --cache=false -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com\n")
+	fmt.Printf("  dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com\n")
 	fmt.Printf("  dj https://example.com -f md --debug\n\n")
 	if outputDir != "" {
 		fmt.Printf("Cache path: %s\nOutput path: %s\n", fetcher.GetTempDir(), outputDir)
@@ -86,9 +85,9 @@ func main() {
 	var proxy string
 	var cookie string
 	var url string
-	var noRandomTLS bool      // --no-random-tls 关闭随机化 TLS 指纹
-	var rawHeaders []string   // 收集所有 -H/--header 值，最后一次性解析
-	var timeoutSecs int = 30  // -t/--timeout 单个 HTTP 请求超时秒数
+	var noRandomTLS bool     // --no-random-tls 关闭随机化 TLS 指纹
+	var rawHeaders []string  // 收集所有 -H/--header 值，最后一次性解析
+	var timeoutSecs int = 30 // -t/--timeout 单个 HTTP 请求超时秒数
 
 	// 取下一段参数值（支持 --flag value 和 --flag=value 两种形式）
 	nextValue := func(i *int) (string, bool) {
@@ -118,8 +117,10 @@ func main() {
 		switch {
 		case name == "--debug" || name == "-d" || name == "-debug":
 			debug = true
+		case name == "--no-cache":
+			enableCache = false
 		case name == "--cache":
-			// 显式 --cache=true/false 可在 val 中给值
+			// 兼容旧语法 --cache=false
 			if val == "" {
 				if v, ok := nextValue(&i); ok {
 					val = v

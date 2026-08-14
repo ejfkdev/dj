@@ -72,8 +72,7 @@ dj -f md https://example.com
 |------|------|
 | `--debug` | 启用调试输出 |
 | `-f <format>` | 输出格式：`text`（默认）、`json`、`md` |
-| `--cache` | 启用缓存（默认启用） |
-| `--cache=false` | 禁用缓存读取（下载的文件仍会保存到磁盘） |
+| `--no-cache` | 禁用缓存读取（下载的文件仍会保存到磁盘） |
 | `--useragent=<UA>` | 自定义 User-Agent |
 | `--ua=<UA>` | `--useragent` 的短别名 |
 | `-x <URL>` | 代理地址（http/https/socks5），优先级高于环境变量 |
@@ -121,7 +120,7 @@ dj -o ./output https://example.com
 dj -t 60 https://example.com
 
 # 组合使用：全新扫描、输出到指定目录、带代理和超时
-dj --cache=false -o ./output -x socks5://127.0.0.1:1080 -t 300 https://example.com
+dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 ```
 
 <details>
@@ -201,7 +200,7 @@ dj https://demo.1panel.cn
 启用缓存时（默认），第二次运行同一站点会完全跳过网络请求：
 - 从 `meta.json` 加载之前发现的 JS URL 列表
 - 从本地缓存恢复 source map 和源码
-- 使用 `--cache=false` 可强制全量重新扫描（文件仍会保存到磁盘，只是不从缓存读取）
+- 使用 `--no-cache` 可强制全量重新扫描（文件仍会保存到磁盘，只是不从缓存读取）
 
 ### 输出目录
 

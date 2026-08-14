@@ -324,18 +324,18 @@ func (p *Pipeline) probeSourceMap(jsURL string) {
 			if p.Debug {
 				p.debugLog("probeSourceMap: cache hit, skip network: %s", mapURL)
 			}
-		// 标记该 JS 有 source map，并触发 foundCh 通知
-		p.knowledge.SetJSHasSourceMap(jsURL, true)
-		p.foundChMu.Lock()
-		if !p.foundChSeen[mapURL] {
-			p.foundChSeen[mapURL] = true
-			p.foundChMu.Unlock()
-			p.sendToFoundCh(mapURL)
-		} else {
-			p.foundChMu.Unlock()
-		}
-		p.restoreSourcesFromMap(jsURL, mapURL, cached)
-		return
+			// 标记该 JS 有 source map，并触发 foundCh 通知
+			p.knowledge.SetJSHasSourceMap(jsURL, true)
+			p.foundChMu.Lock()
+			if !p.foundChSeen[mapURL] {
+				p.foundChSeen[mapURL] = true
+				p.foundChMu.Unlock()
+				p.sendToFoundCh(mapURL)
+			} else {
+				p.foundChMu.Unlock()
+			}
+			p.restoreSourcesFromMap(jsURL, mapURL, cached)
+			return
 		}
 	}
 
@@ -1449,8 +1449,8 @@ func (p *Pipeline) processResults(ctx context.Context, results []*Result, source
 					enqueuedCount++
 				}
 			}
-			}
-			if p.Debug && enqueuedCount > 0 {
+		}
+		if p.Debug && enqueuedCount > 0 {
 			p.debugLog("Enqueued %d new URLs from %s", enqueuedCount, sourceURL)
 		}
 
@@ -1957,6 +1957,8 @@ func min(a, b int) int {
 }
 
 // detectContentTypeFromHeader 优先从 HTTP 响应头检测 Content-Type
+// 当 Content-Type 不明确时（text/plain、application/octet-stream、空等），
+// 根据实际内容判断：HTML 内容返回 HTML，否则根据调用方的 URL 后缀判断。
 func (p *Pipeline) detectContentTypeFromHeader(contentTypeHeader string, content []byte) ContentType {
 	// 解析 Content-Type header
 	lowerCT := strings.ToLower(contentTypeHeader)
@@ -1972,8 +1974,7 @@ func (p *Pipeline) detectContentTypeFromHeader(contentTypeHeader string, content
 		return ContentTypeJS
 	}
 
-	// Content-Type 不明确或为空时，只在有实际内容且内容像 JS 时才返回 JS
-	// 不再仅根据 URL 后缀假设是 JS
+	// Content-Type 不明确或为空时，检查实际内容
 	if len(content) > 0 {
 		trimmed := strings.TrimSpace(string(content[:200]))
 		if strings.HasPrefix(trimmed, "<!DOCTYPE") || strings.HasPrefix(trimmed, "<html") {
@@ -1982,14 +1983,19 @@ func (p *Pipeline) detectContentTypeFromHeader(contentTypeHeader string, content
 		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 			return ContentTypeJSON
 		}
-		// 内容看起来像 JS 代码
+		// 内容不是 HTML/JSON，且看起来像 JS 代码
 		if strings.Contains(trimmed, "function") || strings.Contains(trimmed, "=>") ||
-			strings.Contains(trimmed, "require") || strings.Contains(trimmed, "export") {
+			strings.Contains(trimmed, "require") || strings.Contains(trimmed, "export") ||
+			strings.Contains(trimmed, "var ") || strings.Contains(trimmed, "let ") ||
+			strings.Contains(trimmed, "const ") || strings.HasPrefix(trimmed, "!") ||
+			strings.HasPrefix(trimmed, "(") || strings.HasPrefix(trimmed, "window") {
 			return ContentTypeJS
 		}
 	}
 
-	return ContentTypeHTML // 默认不认为是 JS
+	// 无法确定时默认当作 JS（宁可多包含也不漏）
+	// 服务器配置错误（text/plain、空 Content-Type）的 JS 文件不应被丢弃
+	return ContentTypeJS
 }
 
 // GetKnowledgeFromContext 从 context 中获取 KnowledgeBase

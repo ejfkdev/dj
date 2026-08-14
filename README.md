@@ -72,8 +72,7 @@ dj -f md https://example.com
 |--------|-------------|
 | `--debug` | Enable debug output |
 | `-f <format>` | Output format: `text` (default), `json`, `md` |
-| `--cache` | Enable caching (enabled by default) |
-| `--cache=false` | Disable cache reads (still saves downloaded files to disk) |
+| `--no-cache` | Disable cache reads (still saves downloaded files to disk) |
 | `--useragent=<UA>` | Custom User-Agent string |
 | `--ua=<UA>` | Short alias for `--useragent` |
 | `-x <URL>` | Proxy URL (http/https/socks5), overrides environment variables |
@@ -121,7 +120,7 @@ dj -o ./output https://example.com
 dj -t 60 https://example.com
 
 # Combine: fresh scan, save to output dir, with proxy and timeout
-dj --cache=false -o ./output -x socks5://127.0.0.1:1080 -t 300 https://example.com
+dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 ```
 
 ### Tested websites
@@ -225,7 +224,7 @@ dj https://demo.1panel.cn
 When caching is enabled (default), the second run on the same site skips network requests entirely:
 - Loads previously discovered JS URLs from `meta.json`
 - Restores source maps and source code from local cache
-- Use `--cache=false` to force a full re-scan (files are still saved to disk, just not read from cache)
+- Use `--no-cache` to force a full re-scan (files are still saved to disk, just not read from cache)
 
 ## Output formats
 
