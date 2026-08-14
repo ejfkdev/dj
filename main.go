@@ -48,7 +48,7 @@ func printHelp() {
 	fmt.Printf("  -H, --header <K: V>      custom HTTP header, repeatable (curl-style, non-ASCII supported)\n")
 	fmt.Printf("      --no-random-tls      disable randomized TLS fingerprint (use fixed Chrome)\n")
 	fmt.Printf("  -o, --output <dir>       output directory (saves a copy without site subdir)\n")
-	fmt.Printf("  -t, --timeout <secs>     overall timeout in seconds (default: 120)\n")
+	fmt.Printf("  -t, --timeout <secs>     per-request timeout in seconds (default: 30)\n")
 	fmt.Printf("  -h, --help               show this help\n\n")
 	fmt.Printf("Notes:\n")
 	fmt.Printf("  - URL is the first non-flag argument; flags can appear before or after it\n")
@@ -66,8 +66,8 @@ func printHelp() {
 	fmt.Printf("  dj -f json --cookie 'cf_clearance=xxx; key=val' https://example.com\n")
 	fmt.Printf("  dj -H 'Referer: https://google.com' -H 'X-Token: abc' https://example.com\n")
 	fmt.Printf("  dj -o ./output https://example.com\n")
-	fmt.Printf("  dj -t 300 https://example.com\n")
-	fmt.Printf("  dj --cache=false -o ./output -x socks5://127.0.0.1:1080 -t 300 https://example.com\n")
+	fmt.Printf("  dj -t 60 https://example.com\n")
+	fmt.Printf("  dj --cache=false -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com\n")
 	fmt.Printf("  dj https://example.com -f md --debug\n\n")
 	if outputDir != "" {
 		fmt.Printf("Cache path: %s\nOutput path: %s\n", fetcher.GetTempDir(), outputDir)
@@ -88,7 +88,7 @@ func main() {
 	var url string
 	var noRandomTLS bool      // --no-random-tls 关闭随机化 TLS 指纹
 	var rawHeaders []string   // 收集所有 -H/--header 值，最后一次性解析
-	var timeoutSecs int = 120 // -t/--timeout 整体超时秒数（替代原硬编码 30s）
+	var timeoutSecs int = 30  // -t/--timeout 单个 HTTP 请求超时秒数
 
 	// 取下一段参数值（支持 --flag value 和 --flag=value 两种形式）
 	nextValue := func(i *int) (string, bool) {
@@ -281,7 +281,7 @@ func main() {
 	if noRandomTLS {
 		fpMode = fetcher.TLSFingerprintChrome
 	}
-	pipeline.SetFetcherConfig(proxy, ua, fpMode)
+	pipeline.SetFetcherConfig(proxy, ua, fpMode, time.Duration(timeoutSecs)*time.Second)
 
 	// 注入 cookie（用于绕过 Cloudflare 等防护）
 	if cookie != "" {
@@ -315,8 +315,9 @@ func main() {
 	pipeline.SetCacheConfig(cacheConfig)
 
 	// 执行
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSecs)*time.Second)
-	defer cancel()
+	// -t/--timeout 现在控制单个 HTTP 请求超时（传给 fetcher），不再是整体运行超时。
+	// pipeline 不设整体超时上限，确保 JS 数量多的站点也能完整爬取。
+	ctx := context.Background()
 
 	// text 模式：实时输出；json/md 模式：收集后统一输出
 	if outputFormat == extractor.FormatText {

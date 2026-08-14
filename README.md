@@ -81,7 +81,7 @@ dj -f md https://example.com
 | `-H <K: V>` | Custom HTTP header, repeatable (curl-style) |
 | `--no-random-tls` | Disable randomized TLS fingerprint (use fixed Chrome) |
 | `-o <dir>` | Output directory (saves a copy of all files: js/, html/, source_map/, sources/) without site subdir |
-| `-t <secs>` | Overall timeout in seconds (default: 120) |
+| `-t <secs>` | Per-request timeout in seconds (default: 30) |
 | `-h` | Show help information |
 
 ### Examples
@@ -117,8 +117,8 @@ dj --debug https://example.com
 # Save files to a custom output directory (without site subdir)
 dj -o ./output https://example.com
 
-# Set overall timeout (default: 120 seconds)
-dj -t 300 https://example.com
+# Set per-request timeout (default: 30 seconds)
+dj -t 60 https://example.com
 
 # Combine: fresh scan, save to output dir, with proxy and timeout
 dj --cache=false -o ./output -x socks5://127.0.0.1:1080 -t 300 https://example.com
@@ -126,17 +126,52 @@ dj --cache=false -o ./output -x socks5://127.0.0.1:1080 -t 300 https://example.c
 
 ### Tested websites
 
-| Website | JS Count |
-|---------|----------|
-| [docs.qq.com](https://docs.qq.com) | ~3270 |
-| [vue.ruoyi.vip](https://vue.ruoyi.vip) | ~68 |
-| [gitee.com](https://gitee.com) | ~63 |
-| [nuxt.com.cn](https://nuxt.com.cn) | ~160 |
-| [chat.z.ai](https://chat.z.ai) | ~539 |
-| [show.cool-admin.com/login](https://show.cool-admin.com/login) | ~120 |
-| [demo.1panel.cn](https://demo.1panel.cn) | ~161 |
-| [mail.qq.com](https://mail.qq.com) | ~418 |
-| [chat.deepseek.com](https://chat.deepseek.com) | ~634 |
+<details>
+<summary>📊 Tested websites (click to expand)</summary>
+
+**Framework / Admin**
+
+| Site | JS | Site | JS |
+|-----|----|-----|----|
+| [vue.ruoyi.vip](https://vue.ruoyi.vip) | 70 | [demo.1panel.cn](https://demo.1panel.cn) | 524 |
+| [show.cool-admin.com/login](https://show.cool-admin.com/login) | 135 | [ant.design](https://ant.design) | 2536 |
+| [arco.design](https://arco.design) | 461 | [vuejs.org](https://vuejs.org) | 17 |
+| [react.dev](https://react.dev) | 34 | [svelte.dev](https://svelte.dev) | 74 |
+| [angular.io](https://angular.io) | 289 | [nuxt.com.cn](https://nuxt.com.cn) | 163 |
+
+**AI / Cloud**
+
+| Site | JS | Site | JS |
+|-----|----|-----|----|
+| [chat.deepseek.com](https://chat.deepseek.com) | 41 | [chat.z.ai](https://chat.z.ai) | 167 |
+| [kimi.moonshot.cn](https://kimi.moonshot.cn) | 383 | [cloud.tencent.com](https://cloud.tencent.com) | 1532 |
+| [docs.qq.com](https://docs.qq.com) | 3617 | [www.aliyun.com](https://www.aliyun.com) | 59 |
+
+**Enterprise / Collaboration**
+
+| Site | JS | Site | JS |
+|-----|----|-----|----|
+| [feishu.cn](https://www.feishu.cn) | 460 | [dingtalk.com](https://www.dingtalk.com) | 22 |
+| [youzan.com](https://www.youzan.com) | 332 | [kingdee.com](https://www.kingdee.com) | 34 |
+| [chanjet.com](https://www.chanjet.com) | 20 | [landray.com.cn](https://www.landray.com.cn) | 11 |
+
+**E-commerce / Portal**
+
+| Site | JS | Site | JS |
+|-----|----|-----|----|
+| [gitee.com](https://gitee.com) | 100 | [baidu.com](https://www.baidu.com) | 314 |
+| [meituan.com](https://www.meituan.com) | 109 | [pinduoduo.com](https://www.pinduoduo.com) | 7 |
+| [bilibili.com](https://www.bilibili.com) | 44 | [juejin.cn](https://www.juejin.cn) | 102 |
+
+**Government / University**
+
+| Site | JS | Site | JS |
+|-----|----|-----|----|
+| [shanghai.gov.cn](https://www.shanghai.gov.cn) | 42 | [xinhuanet.com](https://www.xinhuanet.com) | 12 |
+| [zju.edu.cn](https://www.zju.edu.cn) | 6 | [tsinghua.edu.cn](https://www.tsinghua.edu.cn) | 17 |
+| [chaoxing.com](https://www.chaoxing.com) | 53 | [www.people.com.cn](https://www.people.com.cn) | 4 |
+
+</details>
 
 ```bash
 dj https://docs.qq.com

@@ -112,7 +112,7 @@ type WebpackPlugin struct {
 func NewWebpackPlugin() *WebpackPlugin {
 	return &WebpackPlugin{
 		webpackMarkerRe:    regexp.MustCompile(`__webpack_require__|__webpack_exports__|webpackJsonp`),
-		publicPathRe:       regexp.MustCompile(`(?:__webpack_require__\.\w+|window\.__webpack_public_path__|window\.resourceBaseUrl|a\.p)\s*=\s*["']([^"']+)["']`),
+		publicPathRe:       regexp.MustCompile(`(?:__webpack_require__\.\w+|window\.__webpack_public_path__|window\.resourceBaseUrl|[a-z]\.p)\s*=\s*["']([^"']+)["']`),
 		chunkHashMapRe:     regexp.MustCompile(`"(chunk-[0-9a-f]+)"\s*:\s*"([0-9a-f]+)"`),
 		chunkNumericHashRe: regexp.MustCompile(`[\{,]\s*(\d+)\s*:\s*["']([a-f0-9]{20,24})["']`),
 		// 匹配箭头函数格式: X.u=Y=>"prefix/"+Y+"-"+{...}[Y]+".suffix"
@@ -369,6 +369,18 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 			}
 		}
 
+		// 如果有 publicPath 且是绝对 URL，直接拼接成绝对 URL（跳过 probeFragment 的错误拼接）
+		var publicPath string
+		if len(result.PublicPaths) > 0 {
+			pp := result.PublicPaths[0]
+			if strings.HasPrefix(pp, "http://") || strings.HasPrefix(pp, "https://") {
+				publicPath = pp
+				if !strings.HasSuffix(publicPath, "/") {
+					publicPath += "/"
+				}
+			}
+		}
+
 		// 生成 chunk URL: prefix + name + "." + hash + ".js"
 		for id, hash := range hashMap {
 			var chunkPath string
@@ -377,11 +389,20 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 			} else {
 				chunkPath = prefix + id + "." + hash + ".js"
 			}
-			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:      chunkPath,
-				FromURL:  input.SourceURL,
-				IsInline: false,
-			})
+			// 如果有绝对 publicPath，拼接成完整 URL 直接入队（避免 probeFragment 用错误 base 拼接）
+			if publicPath != "" {
+				result.URLs = append(result.URLs, extractor.DiscoveredJS{
+					URL:      publicPath + chunkPath,
+					FromURL:  input.SourceURL,
+					IsInline: false,
+				})
+			} else {
+				result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
+					URL:      chunkPath,
+					FromURL:  input.SourceURL,
+					IsInline: false,
+				})
+			}
 		}
 		return result, nil
 	}
@@ -417,6 +438,35 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 			}
 		}
 
+		// 如果有 publicPath 且是绝对 URL，直接拼接成绝对 URL
+		var publicPath string
+		if len(result.PublicPaths) > 0 {
+			pp := result.PublicPaths[0]
+			if strings.HasPrefix(pp, "http://") || strings.HasPrefix(pp, "https://") {
+				publicPath = pp
+				if !strings.HasSuffix(publicPath, "/") {
+					publicPath += "/"
+				}
+			}
+		}
+
+		// 辅助函数：根据 publicPath 是否存在，将 chunkPath 加入 URLs 或 ProbeTargets
+		addChunkPath := func(chunkPath string) {
+			if publicPath != "" {
+				result.URLs = append(result.URLs, extractor.DiscoveredJS{
+					URL:      publicPath + chunkPath,
+					FromURL:  input.SourceURL,
+					IsInline: false,
+				})
+			} else {
+				result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
+					URL:      chunkPath,
+					FromURL:  input.SourceURL,
+					IsInline: false,
+				})
+			}
+		}
+
 		// 生成 chunk URL: prefix + name + "." + hash + ".js"
 		for id, hash := range hashMap {
 			var chunkPath string
@@ -425,11 +475,7 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 			} else {
 				chunkPath = prefix + id + "." + hash + ".js"
 			}
-			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:      chunkPath,
-				FromURL:  input.SourceURL,
-				IsInline: false,
-			})
+			addChunkPath(chunkPath)
 		}
 
 		// 回退：当 idValueRe（数字 key）未提取到 hash 映射时，
@@ -451,11 +497,7 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 					} else {
 						chunkPath = prefix + chunkID + "." + hash + ".js"
 					}
-					result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-						URL:      chunkPath,
-						FromURL:  input.SourceURL,
-						IsInline: false,
-					})
+					addChunkPath(chunkPath)
 				}
 			}
 		}
@@ -747,6 +789,8 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 	// 提取 .e(chunkId) 形式的 chunk 动态加载调用
 	// 例如: .e(449) 或 .e(449).then(...)
 	// 如果同时找到 hash 和 chunk ID，生成完整的 chunk URL
+	// 注意：只有在确认是 webpack chunk 加载上下文时才生成通配符，避免误匹配 .charAt(0) 等普通方法调用
+	hasChunkLoadContext := chunkHash != "" || len(webpackChunkNames) > 0
 	for _, callMatch := range p.webpackChunkLoadCallRe.FindAllStringSubmatch(content, -1) {
 		if len(callMatch) > 1 {
 			chunkID := callMatch[1]
@@ -757,8 +801,8 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 					FromURL:  input.SourceURL,
 					IsInline: false,
 				})
-			} else {
-				// 只有 chunk ID，没有 hash，生成带通配符的探测目标
+			} else if hasChunkLoadContext {
+				// 只有在 webpack chunk 上下文中才生成通配符，避免误匹配
 				fragment := chunkID + "-*.js"
 				result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
 					URL:      fragment,

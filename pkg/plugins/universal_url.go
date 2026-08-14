@@ -100,6 +100,11 @@ func (p *UniversalURLPlugin) Analyze(ctx context.Context, input *extractor.Analy
 		if !looksLikeJSURL(rawURL) {
 			return
 		}
+		// 跳过 webpack 内部模块路径（如 ./node_modules/lodash/isObjectLike.js）
+		// 这些是打包后的模块 ID，不是可访问的 HTTP URL
+		if isWebpackInternalPath(rawURL) {
+			return
+		}
 		// 解析为绝对 URL
 		absoluteURL := extractor.ResolveRelativePath(input.SourceURL, rawURL)
 		absoluteURL = extractor.NormalizeURL(absoluteURL)

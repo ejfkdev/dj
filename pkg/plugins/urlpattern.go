@@ -85,6 +85,14 @@ func (p *URLPatternPlugin) Analyze(ctx context.Context, input *extractor.Analyze
 		if seenJS[jsPath] {
 			continue
 		}
+
+		// 跳过 webpack/bundler 内部模块路径，这些不是 HTTP URL 而是打包后的模块 ID
+		// 如 ./node_modules/lodash/isObjectLike.js、node_modules/react/index.js
+		// 这些路径在 webpack 打包后存在于 JS 内容中，但不是可访问的 HTTP URL
+		if isWebpackInternalPath(jsPath) {
+			continue
+		}
+
 		seenJS[jsPath] = true
 
 		result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
@@ -95,4 +103,22 @@ func (p *URLPatternPlugin) Analyze(ctx context.Context, input *extractor.Analyze
 	}
 
 	return result, nil
+}
+
+// isWebpackInternalPath 判断路径是否是 webpack/bundler 内部模块路径，不是真实 HTTP URL。
+// 这些路径在打包后的 JS 中作为模块 ID 出现，如：
+//   - ./node_modules/lodash/isObjectLike.js
+//   - node_modules/react/index.js
+//   - webpack:///./src/App.js
+//   - ./src/utils.js (源码内部引用，通常不以 HTTP 方式提供)
+func isWebpackInternalPath(path string) bool {
+	// node_modules 路径（最常见的误报来源）
+	if strings.Contains(path, "node_modules/") {
+		return true
+	}
+	// webpack 内部路径
+	if strings.HasPrefix(path, "webpack://") || strings.HasPrefix(path, "webpack-internal://") {
+		return true
+	}
+	return false
 }

@@ -110,18 +110,35 @@ func (p *Pipeline) SetCacheConfig(cfg *fetcher.CacheConfig) {
 	p.cacheConfig = cfg
 }
 
-// SetFetcherConfig 设置 Fetcher 配置（代理、User-Agent 和 TLS 指纹模式）
-func (p *Pipeline) SetFetcherConfig(proxy, userAgent string, fpMode fetcher.TLSFingerprintMode) {
+// sendToFoundCh 安全地发送 URL 到 foundCh。
+// 使用 recover 防止主循环关闭 channel 后 goroutine 发送导致 panic。
+// 去重由 foundChSeen 保证（调用方需先加锁检查）。
+func (p *Pipeline) sendToFoundCh(url string) {
+	func() {
+		defer func() {
+			recover() // 防止 send on closed channel panic
+		}()
+		select {
+		case p.foundCh <- url:
+		default:
+		}
+	}()
+}
+
+// SetFetcherConfig 设置 Fetcher 配置（代理、User-Agent、TLS 指纹模式和请求超时）
+func (p *Pipeline) SetFetcherConfig(proxy, userAgent string, fpMode fetcher.TLSFingerprintMode, reqTimeout time.Duration) {
 	f, err := fetcher.NewFetcherWithConfig(fetcher.FetcherConfig{
 		Proxy:          proxy,
 		UseUTLS:        true,
 		TLSFingerprint: fpMode,
+		RequestTimeout: reqTimeout,
 	})
 	if err != nil {
 		// 降级为不使用 uTLS
 		f, _ = fetcher.NewFetcherWithConfig(fetcher.FetcherConfig{
-			Proxy:   proxy,
-			UseUTLS: false,
+			Proxy:          proxy,
+			UseUTLS:        false,
+			RequestTimeout: reqTimeout,
 		})
 	}
 	if userAgent != "" {
@@ -307,19 +324,18 @@ func (p *Pipeline) probeSourceMap(jsURL string) {
 			if p.Debug {
 				p.debugLog("probeSourceMap: cache hit, skip network: %s", mapURL)
 			}
-			// 标记该 JS 有 source map，并触发 foundCh 通知
-			p.knowledge.SetJSHasSourceMap(jsURL, true)
-			p.foundChMu.Lock()
-			if !p.foundChSeen[mapURL] {
-				p.foundChSeen[mapURL] = true
-				select {
-				case p.foundCh <- mapURL:
-				default:
-				}
-			}
+		// 标记该 JS 有 source map，并触发 foundCh 通知
+		p.knowledge.SetJSHasSourceMap(jsURL, true)
+		p.foundChMu.Lock()
+		if !p.foundChSeen[mapURL] {
+			p.foundChSeen[mapURL] = true
 			p.foundChMu.Unlock()
-			p.restoreSourcesFromMap(jsURL, mapURL, cached)
-			return
+			p.sendToFoundCh(mapURL)
+		} else {
+			p.foundChMu.Unlock()
+		}
+		p.restoreSourcesFromMap(jsURL, mapURL, cached)
+		return
 		}
 	}
 
@@ -368,12 +384,11 @@ func (p *Pipeline) probeSourceMap(jsURL string) {
 		p.foundChMu.Lock()
 		if !p.foundChSeen[mapURL] {
 			p.foundChSeen[mapURL] = true
-			select {
-			case p.foundCh <- mapURL:
-			default:
-			}
+			p.foundChMu.Unlock()
+			p.sendToFoundCh(mapURL)
+		} else {
+			p.foundChMu.Unlock()
 		}
-		p.foundChMu.Unlock()
 
 		// 标记该 JS 有 source map
 		p.knowledge.SetJSHasSourceMap(jsURL, true)
@@ -460,9 +475,11 @@ func (p *Pipeline) getJSCachePath(url string) (filename string, ok bool) {
 	path = strings.TrimPrefix(path, "/")
 	path = strings.ReplaceAll(path, "/", "-")
 
-	// 组合文件名: host-path.js (如果 path 不以 .js/.mjs/.css 结尾才加)
+	// 组合文件名: host-path (保留已知后缀，否则追加 .js)
 	filename = host + "-" + path
-	if !strings.HasSuffix(filename, ".js") && !strings.HasSuffix(filename, ".mjs") && !strings.HasSuffix(filename, ".css") {
+	if !strings.HasSuffix(filename, ".js") && !strings.HasSuffix(filename, ".mjs") &&
+		!strings.HasSuffix(filename, ".css") && !strings.HasSuffix(filename, ".ts") &&
+		!strings.HasSuffix(filename, ".tsx") && !strings.HasSuffix(filename, ".vue") {
 		filename += ".js"
 	}
 	return filename, true
@@ -941,12 +958,11 @@ func (p *Pipeline) loadFromCacheMetadata() int {
 		p.foundChMu.Lock()
 		if !p.foundChSeen[normalizedURL] {
 			p.foundChSeen[normalizedURL] = true
-			select {
-			case p.foundCh <- normalizedURL:
-			default:
-			}
+			p.foundChMu.Unlock()
+			p.sendToFoundCh(normalizedURL)
+		} else {
+			p.foundChMu.Unlock()
 		}
-		p.foundChMu.Unlock()
 
 		// 若该 JS 有 source map，从缓存恢复源码
 		if jsMeta.SourceMapURL != "" {
@@ -1141,18 +1157,14 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 			if p.Debug {
 				p.debugLog("processJSContent fetch error: url=%s, err=%v", normalizedURL, err)
 			}
-			// 非 2xx 但 URL 看起来是 JS 的，仍输出 URL（用户应知道它的存在）
-			p.recordUnreachableJS(normalizedURL, discovered)
 			return
 		}
 
-		// 只处理 2xx 响应
+		// 只处理 2xx 响应，非 2xx 直接丢弃（不输出 404 等不存在的 URL）
 		if result.StatusCode < 200 || result.StatusCode >= 300 {
 			if p.Debug {
 				p.debugLog("processJSContent: non-2xx status %d: %s", result.StatusCode, normalizedURL)
 			}
-			// 非 2xx 但 URL 看起来是 JS 的，仍输出 URL
-			p.recordUnreachableJS(normalizedURL, discovered)
 			return
 		}
 
@@ -1182,8 +1194,38 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 		}
 	}
 
-	// 如果 URL 以 .js/.mjs/.jsonp 结尾，但 Content-Type 是 HTML，直接跳过
+	// 如果 URL 以 .js/.mjs/.jsonp 结尾，但 Content-Type 是 HTML，直接跳过。
+	// 但如果内容为空（如 hm.baidu.com 返回 200 + 0 字节），说明这是真实的 JS 端点
+	// 只是返回了空内容——仍应输出 URL，不做后续插件分析。
 	if contentType == ContentTypeHTML && isLikelyStaticResource(normalizedURL) {
+		if len(content) == 0 {
+			// 200 + 空体 + URL 看起来是 JS：直接加入输出（真实端点）
+			p.jsURLsMu.Lock()
+			found := false
+			for _, js := range p.jsURLs {
+				if js.URL == normalizedURL {
+					found = true
+					break
+				}
+			}
+			if !found {
+				p.jsURLs = append(p.jsURLs, DiscoveredJS{
+					URL:        normalizedURL,
+					FromURL:    discovered.FromURL,
+					FromPlugin: discovered.FromPlugin,
+					IsInline:   discovered.IsInline,
+				})
+			}
+			p.jsURLsMu.Unlock()
+			p.foundChMu.Lock()
+			if !p.foundChSeen[normalizedURL] {
+				p.foundChSeen[normalizedURL] = true
+				p.foundChMu.Unlock()
+				p.sendToFoundCh(normalizedURL)
+			} else {
+				p.foundChMu.Unlock()
+			}
+		}
 		return
 	}
 
@@ -1207,6 +1249,10 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 		}
 		p.saveSourceMapToCache(discovered.FromURL, mapContent)
 		p.restoreSourcesFromMap(discovered.FromURL, normalizedURL, mapContent)
+		// Source map 是 JSON 文件，不是 JS。跳过插件分析，防止从 sources 数组中
+		// 提取源码路径（如 node_modules/lodash/isObjectLike.js）当作 URL 入队，
+		// 产生大量不存在的 404 URL。
+		return
 	}
 
 	// 分发给所有插件分析
@@ -1249,12 +1295,11 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 		p.foundChMu.Lock()
 		if !p.foundChSeen[normalizedURL] {
 			p.foundChSeen[normalizedURL] = true
-			select {
-			case p.foundCh <- normalizedURL:
-			default:
-			}
+			p.foundChMu.Unlock()
+			p.sendToFoundCh(normalizedURL)
+		} else {
+			p.foundChMu.Unlock()
 		}
-		p.foundChMu.Unlock()
 
 		// 添加到 knownPaths 供后续探测使用
 		p.knowledge.AddKnownPath(normalizedURL)
@@ -1297,16 +1342,15 @@ func (p *Pipeline) recordUnreachableJS(url string, discovered DiscoveredJS) {
 	}
 	p.jsURLsMu.Unlock()
 
-	// 发送到 foundCh
+	// 发送到 foundCh（使用安全方法，防止 send on closed channel）
 	p.foundChMu.Lock()
 	if !p.foundChSeen[url] {
 		p.foundChSeen[url] = true
-		select {
-		case p.foundCh <- url:
-		default:
-		}
+		p.foundChMu.Unlock()
+		p.sendToFoundCh(url)
+	} else {
+		p.foundChMu.Unlock()
 	}
-	p.foundChMu.Unlock()
 
 	if p.Debug {
 		p.debugLog("recordUnreachableJS: %s (unreachable but recorded)", url)
@@ -1389,21 +1433,24 @@ func (p *Pipeline) processResults(ctx context.Context, results []*Result, source
 		for i := range r.URLs {
 			discovered := &r.URLs[i]
 			normalizedURL := NormalizeURL(discovered.URL)
-			if !p.knowledge.IsSeenURL(normalizedURL) {
-				// 如果是 data: URI（内联 source map），保存到缓存
-				if strings.HasPrefix(normalizedURL, "data:") {
-					p.saveDataURIToCache(sourceURL, discovered.URL)
+			// 展开 CDN combo-loader URL（含 `??` 语法，如 WordPress /_static/??/js/a.js,/js/b.js）
+			for _, expandedURL := range ExpandComboLoader(normalizedURL) {
+				expandedDiscovered := *discovered
+				expandedDiscovered.URL = expandedURL
+				if p.knowledge.IsSeenURL(expandedURL) {
 					continue
 				}
-				discovered.FromPlugin = r.FromPlugin
-				if p.tryEnqueue(normalizedURL, discovered) {
+				if strings.HasPrefix(expandedURL, "data:") {
+					p.saveDataURIToCache(sourceURL, expandedDiscovered.URL)
+					continue
+				}
+				expandedDiscovered.FromPlugin = r.FromPlugin
+				if p.tryEnqueue(expandedURL, &expandedDiscovered) {
 					enqueuedCount++
-					// 注意：不在这里添加到 jsURLs
-					// jsURLs 的添加在 processURL/processFragment 中进行，届时从 urlContext 获取上下文
 				}
 			}
-		}
-		if p.Debug && enqueuedCount > 0 {
+			}
+			if p.Debug && enqueuedCount > 0 {
 			p.debugLog("Enqueued %d new URLs from %s", enqueuedCount, sourceURL)
 		}
 
@@ -1837,17 +1884,33 @@ func joinURLPath(baseURL, path string) string {
 
 // isLikelyStaticResource 判断 URL 是否是静态资源（.js/.css 等）
 func isLikelyStaticResource(urlStr string) bool {
-	lowerURL := strings.ToLower(urlStr)
-	return strings.HasSuffix(lowerURL, ".js") ||
-		strings.HasSuffix(lowerURL, ".mjs") ||
-		strings.HasSuffix(lowerURL, ".jsonp") ||
-		strings.HasSuffix(lowerURL, ".css") ||
-		strings.HasSuffix(lowerURL, ".woff") ||
-		strings.HasSuffix(lowerURL, ".woff2") ||
-		strings.HasSuffix(lowerURL, ".ttf") ||
-		strings.HasSuffix(lowerURL, ".svg") ||
-		strings.HasSuffix(lowerURL, ".png") ||
-		strings.HasSuffix(lowerURL, ".jpg")
+	// 去掉 query string 和 fragment 再检查后缀
+	path := urlStr
+	if idx := strings.IndexAny(path, "?#"); idx >= 0 {
+		path = path[:idx]
+	}
+	lowerPath := strings.ToLower(path)
+	// 宽松匹配：路径后缀 OR 完整 URL（含 query）中包含已知后缀
+	// 覆盖：hm.baidu.com/hm.js?xxx（路径有 .js）
+	//       example.com/load?type=module.js（query 中有 .js）
+	lowerFull := strings.ToLower(urlStr)
+	return strings.HasSuffix(lowerPath, ".js") ||
+		strings.HasSuffix(lowerPath, ".mjs") ||
+		strings.HasSuffix(lowerPath, ".jsonp") ||
+		strings.HasSuffix(lowerPath, ".ts") ||
+		strings.HasSuffix(lowerPath, ".tsx") ||
+		strings.HasSuffix(lowerPath, ".vue") ||
+		strings.HasSuffix(lowerPath, ".css") ||
+		strings.HasSuffix(lowerPath, ".woff") ||
+		strings.HasSuffix(lowerPath, ".woff2") ||
+		strings.HasSuffix(lowerPath, ".ttf") ||
+		strings.HasSuffix(lowerPath, ".svg") ||
+		strings.HasSuffix(lowerPath, ".png") ||
+		strings.HasSuffix(lowerPath, ".jpg") ||
+		strings.Contains(lowerFull, ".js") ||
+		strings.Contains(lowerFull, ".mjs") ||
+		strings.Contains(lowerFull, ".jsonp") ||
+		strings.Contains(lowerFull, ".tsx")
 }
 
 // isSourceMapURL 判断 URL 是否指向 source map 文件

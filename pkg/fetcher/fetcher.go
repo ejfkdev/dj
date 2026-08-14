@@ -45,6 +45,7 @@ type FetcherConfig struct {
 	Proxy          string             // 代理 URL (http/https/socks5)
 	UseUTLS        bool               // 启用 uTLS TLS 指纹伪装
 	TLSFingerprint TLSFingerprintMode // uTLS 指纹模式（随机/Chrome）
+	RequestTimeout time.Duration      // 单个 HTTP 请求超时（默认 10s）
 }
 
 // FetchResult 包含内容和状态码
@@ -109,10 +110,16 @@ func NewFetcherWithConfig(cfg FetcherConfig) (*Fetcher, error) {
 		transport = stdTransport
 	}
 
+	// 单个请求超时（默认 10s，可由 -t/--timeout 配置）
+	reqTimeout := 10 * time.Second
+	if cfg.RequestTimeout > 0 {
+		reqTimeout = cfg.RequestTimeout
+	}
+
 	return &Fetcher{
 		client: &http.Client{
 			Transport: transport,
-			Timeout:   10 * time.Second,
+			Timeout:   reqTimeout,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 20 {
 					return fmt.Errorf("too many redirects (%d)", len(via))

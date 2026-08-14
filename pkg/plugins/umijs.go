@@ -63,11 +63,11 @@ func (p *UmiJSPlugin) Precheck(ctx context.Context, input *extractor.AnalyzeInpu
 	if input.ContentType != extractor.ContentTypeJS {
 		return false
 	}
+	// 只匹配 umi 特有标记，避免在普通 webpack 站点上误触发
 	return bytesContainsAny(input.Content, [][]byte{
 		[]byte("preload_helper"),
-		[]byte("publicPath"),
-		[]byte("location.pathname"),
 		[]byte("p__"),
+		[]byte("umi.js"),
 	})
 }
 

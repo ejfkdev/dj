@@ -81,7 +81,7 @@ dj -f md https://example.com
 | `-H <K: V>` | 自定义 HTTP 请求头，可重复指定（curl 风格） |
 | `--no-random-tls` | 关闭随机化 TLS 指纹（使用固定 Chrome 指纹） |
 | `-o <dir>` | 输出目录（将所有文件保存一份到此目录：js/、html/、source_map/、sources/，不含站点子目录） |
-| `-t <secs>` | 整体超时秒数（默认 120） |
+| `-t <secs>` | 单个 HTTP 请求超时秒数（默认 30） |
 | `-h` | 显示帮助信息 |
 
 ### 示例
@@ -117,26 +117,59 @@ dj --debug https://example.com
 # 保存到自定义输出目录（不含站点子目录）
 dj -o ./output https://example.com
 
-# 设置整体超时秒数（默认 120）
-dj -t 300 https://example.com
+# 设置单请求超时秒数（默认 30）
+dj -t 60 https://example.com
 
 # 组合使用：全新扫描、输出到指定目录、带代理和超时
 dj --cache=false -o ./output -x socks5://127.0.0.1:1080 -t 300 https://example.com
 ```
 
-### 测试网站
+<details>
+<summary>📊 测试网站（点击展开）</summary>
 
-| 网站 | JS 数量 |
-|------|---------|
-| [docs.qq.com](https://docs.qq.com) | ~3270 |
-| [vue.ruoyi.vip](https://vue.ruoyi.vip) | ~68 |
-| [gitee.com](https://gitee.com) | ~63 |
-| [nuxt.com.cn](https://nuxt.com.cn) | ~160 |
-| [chat.z.ai](https://chat.z.ai) | ~539 |
-| [show.cool-admin.com/login](https://show.cool-admin.com/login) | ~120 |
-| [demo.1panel.cn](https://demo.1panel.cn) | ~161 |
-| [mail.qq.com](https://mail.qq.com) | ~418 |
-| [chat.deepseek.com](https://chat.deepseek.com) | ~634 |
+**框架 / 后台管理**
+
+| 站点 | JS | 站点 | JS |
+|------|----|------|----|
+| [vue.ruoyi.vip](https://vue.ruoyi.vip) | 70 | [demo.1panel.cn](https://demo.1panel.cn) | 524 |
+| [show.cool-admin.com/login](https://show.cool-admin.com/login) | 135 | [ant.design](https://ant.design) | 2536 |
+| [arco.design](https://arco.design) | 461 | [vuejs.org](https://vuejs.org) | 17 |
+| [react.dev](https://react.dev) | 34 | [svelte.dev](https://svelte.dev) | 74 |
+| [angular.io](https://angular.io) | 289 | [nuxt.com.cn](https://nuxt.com.cn) | 163 |
+
+**AI / 云平台**
+
+| 站点 | JS | 站点 | JS |
+|------|----|------|----|
+| [chat.deepseek.com](https://chat.deepseek.com) | 41 | [chat.z.ai](https://chat.z.ai) | 167 |
+| [kimi.moonshot.cn](https://kimi.moonshot.cn) | 383 | [cloud.tencent.com](https://cloud.tencent.com) | 1532 |
+| [docs.qq.com](https://docs.qq.com) | 3617 | [www.aliyun.com](https://www.aliyun.com) | 59 |
+
+**企业 / 协作**
+
+| 站点 | JS | 站点 | JS |
+|------|----|------|----|
+| [feishu.cn](https://www.feishu.cn) | 460 | [dingtalk.com](https://www.dingtalk.com) | 22 |
+| [youzan.com](https://www.youzan.com) | 332 | [kingdee.com](https://www.kingdee.com) | 34 |
+| [chanjet.com](https://www.chanjet.com) | 20 | [landray.com.cn](https://www.landray.com.cn) | 11 |
+
+**电商 / 门户**
+
+| 站点 | JS | 站点 | JS |
+|------|----|------|----|
+| [gitee.com](https://gitee.com) | 100 | [baidu.com](https://www.baidu.com) | 314 |
+| [meituan.com](https://www.meituan.com) | 109 | [pinduoduo.com](https://www.pinduoduo.com) | 7 |
+| [bilibili.com](https://www.bilibili.com) | 44 | [juejin.cn](https://www.juejin.cn) | 102 |
+
+**政务 / 高校**
+
+| 站点 | JS | 站点 | JS |
+|------|----|------|----|
+| [shanghai.gov.cn](https://www.shanghai.gov.cn) | 42 | [xinhuanet.com](https://www.xinhuanet.com) | 12 |
+| [zju.edu.cn](https://www.zju.edu.cn) | 6 | [tsinghua.edu.cn](https://www.tsinghua.edu.cn) | 17 |
+| [chaoxing.com](https://www.chaoxing.com) | 53 | [www.people.com.cn](https://www.people.com.cn) | 4 |
+
+</details>
 
 ```bash
 dj https://docs.qq.com

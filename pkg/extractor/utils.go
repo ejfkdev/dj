@@ -70,3 +70,63 @@ func GetBaseURL(u string) string {
 	}
 	return parsed.Scheme + "://" + parsed.Host
 }
+
+// ExpandComboLoader 展开 CDN combo-loader URL（含 `??` 语法）。
+// 支持 WordPress 和 阿里云 CDN 的 combo-loader 格式：
+//   - WordPress: https://example.com/_static/??/js/a.js,/js/b.js
+//     → https://example.com/_static/js/a.js, https://example.com/_static/js/b.js
+//   - 阿里云 CDN: https://g.alicdn.com/path/??a.js,b.js
+//     → https://g.alicdn.com/path/a.js, https://g.alicdn.com/path/b.js
+// 如果不含 `??` 或展开失败，返回 [url]（原样）。
+func ExpandComboLoader(rawURL string) []string {
+	if !strings.Contains(rawURL, "??") {
+		return []string{rawURL}
+	}
+
+	// 不能用 url.Parse 因为 `?` 会被当作 query string
+	// 直接在原始字符串上处理
+
+	// 找到 `??` 的位置
+	idx := strings.Index(rawURL, "??")
+	if idx < 0 {
+		return []string{rawURL}
+	}
+
+	// 前缀部分（scheme://host + path 前段）
+	prefix := rawURL[:idx] // 如 "https://example.com/_static/" 或 "https://g.alicdn.com/path/"
+
+	// 后缀部分（文件列表）
+	fileList := rawURL[idx+2:] // 如 "/js/a.js,/js/b.js" 或 "a.js,b.js"
+
+	// 可能还有 query string 在文件列表后面
+	// 如 https://example.com/??a.js,b.js?v=1
+	var querySuffix string
+	if qidx := strings.IndexAny(fileList, "?#"); qidx >= 0 {
+		querySuffix = fileList[qidx:]
+		fileList = fileList[:qidx]
+	}
+
+	// 分割文件列表
+	files := strings.Split(fileList, ",")
+	var urls []string
+	for _, f := range files {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		// 拼接前缀 + 文件名
+		fullURL := prefix + f
+		// 如果有 query suffix，添加回去
+		if querySuffix != "" {
+			fullURL += querySuffix
+		}
+		// 清理路径中的多余斜杠（前缀以 / 结尾，文件以 / 开头时）
+		// 但保留正常的单斜杠
+		urls = append(urls, NormalizeURL(fullURL))
+	}
+
+	if len(urls) == 0 {
+		return []string{rawURL}
+	}
+	return urls
+}
