@@ -237,6 +237,7 @@ dj https://demo.1panel.cn
 | **ModernJS** | ByteDance ModernJS route manifest、b.p publicPath |
 | **URLPattern** | 通用 URL 模式匹配和路径探测 |
 | **SourceMap** | `.map` 文件探测（通过 `sourceMappingURL`、HTTP 头或内联 data URI） |
+| **Qiankun** | single-spa 微前端子应用：探测 `entry`/`proEntry` HTML 目录入口，再提取子应用脚本、modulepreload 与内联 `import()` |
 
 Source Map 支持：通过 `sourceMappingURL` 注释、HTTP 响应头或内联 data URI 自动探测。
 

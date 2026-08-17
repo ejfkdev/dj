@@ -202,6 +202,7 @@ dj https://demo.1panel.cn
 | **ModernJS** | ByteDance ModernJS route manifest, b.p publicPath |
 | **URLPattern** | General URL pattern matching and path probing |
 | **SourceMap** | `.map` file detection (via `sourceMappingURL`, HTTP header, or inline data URI) |
+| **Qiankun** | single-spa microfrontend apps: `entry`/`proEntry` HTML directory detection, then sub-app scripts, modulepreload, and inline `import()` extraction |
 | **UniversalURL** | Encoding-aware fallback: decodes JS escapes / URL encoding / Unicode / HTML entities, then captures `<script src>`, `import()`, `require()`, and loose `.js` string matches. Useful for `document.write` injection, custom loaders, and other patterns other plugins miss. |
 
 ## How it works

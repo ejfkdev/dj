@@ -266,6 +266,8 @@ func main() {
 	registry.Register(plugins.NewURLPatternPlugin())
 	registry.Register(plugins.NewSourceMapPlugin())
 	registry.Register(plugins.NewUmiJSPlugin())
+	// qiankun/single-spa 微前端子应用入口（entry/proEntry 指向子应用 HTML 目录）
+	registry.Register(plugins.NewQiankunPlugin())
 	// 通用 URL 兜底提取（编码还原后做宽匹配，捕获 document.write 等其他插件未覆盖的场景）
 	registry.Register(plugins.NewUniversalURLPlugin())
 
