@@ -29,6 +29,12 @@
 
 ## 安装
 
+### Homebrew（macOS）
+
+```bash
+brew install ejfkdev/tap/dj
+```
+
 ### go install（推荐）
 
 ```bash
