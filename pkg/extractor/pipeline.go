@@ -288,11 +288,17 @@ func (p *Pipeline) Run(ctx context.Context, startURL string) ([]string, error) {
 			continue
 		}
 
-		// 为每个 URL 启动一个 goroutine 处理完整流程（fetch + 验证 + 插件分发）
+		// 为每个 URL 启动一个 goroutine 处理完整流程（fetch + 验证 + 插件分发）。
+		// 用信号量限制并发数：避免几百连接同时握手把小 backlog 的静态
+		// 服务器 backlog 打满（connect timed out → URL 静默丢失）。
+		const fetchConcurrency = 48
+		sem := make(chan struct{}, fetchConcurrency)
 		for _, urlStr := range tasks {
 			p.jsWg.Add(1)
 			go func(url string) {
 				defer p.jsWg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
 				p.processJSContentURL(ctx, url)
 			}(urlStr)
 		}
@@ -1255,8 +1261,18 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 			contentType = ContentTypeJS
 		}
 	} else {
-		// 缓存未命中，走网络下载
-		result, err := p.fetcher.FetchWithStatus(normalizedURL)
+		// 缓存未命中，走网络下载。传输层瞬态失败（连接超时/EOF，常见于
+		// 小 backlog 静态服务器被打满）带退避重试，避免 URL 静默丢失后
+		// 其整条动态 import 子链一并消失。
+		var result *fetcher.FetchResult
+		var err error
+		for attempt := 0; attempt < 3; attempt++ {
+			result, err = p.fetcher.FetchWithStatus(normalizedURL)
+			if err == nil {
+				break
+			}
+			time.Sleep(time.Duration(50*(attempt+1)) * time.Millisecond)
+		}
 		if err != nil {
 			if p.Debug {
 				p.debugLog("processJSContent fetch error: url=%s, err=%v", normalizedURL, err)
@@ -1264,7 +1280,12 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 			return
 		}
 
-		// 只处理 2xx 响应，非 2xx 直接丢弃（不输出 404 等不存在的 URL）
+		// 只处理 2xx 响应；5xx/429 重试一次后仍非 2xx 直接丢弃
+		if result.StatusCode == 429 || result.StatusCode >= 500 {
+			if retryResult, rerr := p.fetcher.FetchWithStatus(normalizedURL); rerr == nil {
+				result = retryResult
+			}
+		}
 		if result.StatusCode < 200 || result.StatusCode >= 300 {
 			if p.Debug {
 				p.debugLog("processJSContent: non-2xx status %d: %s", result.StatusCode, normalizedURL)

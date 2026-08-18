@@ -194,7 +194,7 @@ func NewWebpackPlugin() *WebpackPlugin {
 		webpackFederationChunkPatternRe: regexp.MustCompile(`\(\s*\{([^}]+)\}\s*\[\w+\]\s*\|\|\s*\w+\s*\)\s*\+\s*"\."\s*\+\s*\{([^}]+)\}\s*\[\w+\]\s*\+\s*"((?:\.async)?\.js)"`),
 		// __webpack_require__.u 函数中的 chunk URL 映射模式
 		// 匹配: "prefix/"+({name}[e]||e)+"."+{hash}[e]+".js"
-		webpackRequireUChunkPatternRe: regexp.MustCompile(`"([^"]+/)"\s*\+\s*\(\s*\{[^}]+\}\[\w+\]\s*\|\|\s*\w+\s*\)\s*\+\s*"\."\s*\+\s*\{[^}]+\}\[\w+\]\s*\+\s*"\.js"`),
+		webpackRequireUChunkPatternRe: regexp.MustCompile(`"([^"]+/)"\s*\+\s*\(\s*\{([^}]+)\}\s*\[\w+\]\s*\|\|\s*\w+\s*\)\s*\+\s*"\."\s*\+\s*\{([^}]+)\}\s*\[\w+\]\s*\+\s*"\.js"`),
 		// 备用路径前缀正则
 		fallbackRe: regexp.MustCompile(`\+\s*["']([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+/)["']`),
 		// ID -> value 正则
@@ -267,6 +267,30 @@ func (p *WebpackPlugin) extractChunkNameHashMaps(content string) (nameMap, hashM
 	for _, m := range p.mapIdentKeyValueRe.FindAllStringSubmatch(content, -1) {
 		if len(m) > 2 {
 			put(m[1], m[2])
+		}
+	}
+	return nameMap, hashMap
+}
+
+// parseNameHashMaps 从 URL 构造函数里捕获的 name/hash 两个映射表字符串中
+// 提取条目。与 extractChunkNameHashMaps 的区别：严格限定在匹配捕获块内，
+// 避免同文件后面的 CSS 双子映射表对同名 key 后写覆盖（webpack 4 双 map
+// 运行时：JS hash 被 CSS hash 覆盖导致全部 404）。
+func (p *WebpackPlugin) parseNameHashMaps(nameMapStr, hashMapStr string) (map[string]string, map[string]string) {
+	nameMap := make(map[string]string)
+	hashMap := make(map[string]string)
+	for _, re := range []*regexp.Regexp{p.idValueRe, p.fcNumNameRe, p.mapQuotedKeyValueRe, p.mapIdentKeyValueRe} {
+		for _, m := range re.FindAllStringSubmatch(nameMapStr, -1) {
+			if len(m) > 2 {
+				nameMap[m[1]] = m[2]
+			}
+		}
+	}
+	for _, re := range []*regexp.Regexp{p.mapNumericHashRe, p.fcNumHashRe, p.mapQuotedKeyHashRe, p.mapIdentKeyHashRe} {
+		for _, m := range re.FindAllStringSubmatch(hashMapStr, -1) {
+			if len(m) > 2 {
+				hashMap[m[1]] = m[2]
+			}
 		}
 	}
 	return nameMap, hashMap
@@ -534,11 +558,13 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 
 	// __webpack_require__.u 函数中的 chunk URL 映射模式
 	// 匹配: "prefix/"+({name}[e]||e)+"."+{hash}[e]+".js"
-	if match := p.webpackRequireUChunkPatternRe.FindStringSubmatch(content); len(match) > 1 {
+	if match := p.webpackRequireUChunkPatternRe.FindStringSubmatch(content); len(match) > 3 {
 		prefix := match[1] // "static/js/async/"
+		nameMapStr := match[2]
+		hashMapStr := match[3]
 
-		// 提取所有 {id:"value"} 映射（数字/字符串 key），分离 name 和 hash
-		nameMap, hashMap := p.extractChunkNameHashMaps(content)
+		// 仅在捕获的映射块内提取（防 CSS 双子映射表覆盖 JS hash）
+		nameMap, hashMap := p.parseNameHashMaps(nameMapStr, hashMapStr)
 
 		// 如果有 publicPath 且是绝对 URL，直接拼接成绝对 URL
 		var publicPath string
@@ -644,22 +670,7 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 		}
 
 		// 从两个映射表字符串中直接提取（map 作用域，比全内容安全）
-		nameMap := make(map[string]string)
-		hashMap := make(map[string]string)
-		for _, re := range []*regexp.Regexp{p.idValueRe, p.fcNumNameRe, p.mapQuotedKeyValueRe, p.mapIdentKeyValueRe} {
-			for _, m := range re.FindAllStringSubmatch(nameMapStr, -1) {
-				if len(m) > 2 {
-					nameMap[m[1]] = m[2]
-				}
-			}
-		}
-		for _, re := range []*regexp.Regexp{p.mapNumericHashRe, p.fcNumHashRe, p.mapQuotedKeyHashRe, p.mapIdentKeyHashRe} {
-			for _, m := range re.FindAllStringSubmatch(hashMapStr, -1) {
-				if len(m) > 2 {
-					hashMap[m[1]] = m[2]
-				}
-			}
-		}
+		nameMap, hashMap := p.parseNameHashMaps(nameMapStr, hashMapStr)
 
 		// 生成 chunk URL: prefix + name(或 id) + "." + hash + suffix
 		for id, hash := range hashMap {

@@ -90,17 +90,30 @@ func (p *ModuleFederationPlugin) Analyze(ctx context.Context, input *extractor.A
 			for _, name := range []string{"mf-manifest.json", "federation-manifest.json"} {
 				addPath(dir + name)
 			}
-			// vite 布局约定：remoteEntry 位于 <app>/assets/remoteEntry.js 时，
-			// remote 自己的入口 HTML 固定在 <app>/index.html（固定文件名探测，
-			// 非目录列表），用于牵连出只在该 HTML 中引用的 remote 入口 chunk。
+			// remote 自身入口 HTML 约定探测（固定文件名探测，非目录列表）：
+			// remote 的入口页固定在 remoteEntry 所在目录或（vite 布局
+			// <app>/assets/remoteEntry.js 时）其父目录的 index.html。通过它
+			// 牵连出只在该 HTML 中引用的 remote 入口 chunk。覆盖两种布局：
+			//   - /remote/remoteEntry.js            -> /remote/index.html
+			//   - /remote/assets/remoteEntry.js     -> /remote/assets/index.html(404 无害)
+			//                                         与 /remote/index.html
 			if parsed, pErr := url.Parse(entryURL); pErr == nil {
 				segs := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-				if len(segs) == 3 && segs[1] == "assets" {
-					htmlURL := parsed.Scheme + "://" + parsed.Host + "/" + segs[0] + "/index.html"
-					result.Intermediates = append(result.Intermediates, extractor.Intermediate{
-						URL:  htmlURL,
-						Type: extractor.ContentTypeHTML,
-					})
+				if len(segs) >= 2 && segs[len(segs)-1] == "remoteEntry.js" {
+					dirs := [][]string{segs[:len(segs)-1]}
+					if dirs[0][len(dirs[0])-1] == "assets" {
+						dirs = append(dirs, dirs[0][:len(dirs[0])-1])
+					}
+					for _, d := range dirs {
+						if len(d) == 0 {
+							continue
+						}
+						htmlURL := parsed.Scheme + "://" + parsed.Host + "/" + strings.Join(d, "/") + "/index.html"
+						result.Intermediates = append(result.Intermediates, extractor.Intermediate{
+							URL:  htmlURL,
+							Type: extractor.ContentTypeHTML,
+						})
+					}
 				}
 			}
 		}
