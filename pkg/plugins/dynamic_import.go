@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"regexp"
+	"strings"
 
 	"github.com/ejfkdev/dj/pkg/extractor"
 )
@@ -16,7 +17,8 @@ type DynamicImportPlugin struct {
 // NewDynamicImportPlugin 创建插件
 func NewDynamicImportPlugin() *DynamicImportPlugin {
 	return &DynamicImportPlugin{
-		importRe: regexp.MustCompile(`import\s*\(\s*["']([^"']+)["']\s*\)`),
+		// 支持单引号/双引号/反引号模板字面量（无 ${} 占位）
+		importRe: regexp.MustCompile("import\\s*\\(\\s*[\"'`]([^\"'`]+)[\"'`]\\s*\\)"),
 	}
 }
 
@@ -40,6 +42,11 @@ func (p *DynamicImportPlugin) Analyze(ctx context.Context, input *extractor.Anal
 		}
 
 		fragment := string(match[1])
+
+		// 模板占位符（如 ./widgets/${name}.js）无法静态解析，跳过
+		if strings.Contains(fragment, "${") {
+			continue
+		}
 
 		// 尝试解析为完整 URL
 		absoluteURL := extractor.ResolveRelativePath(input.SourceURL, fragment)

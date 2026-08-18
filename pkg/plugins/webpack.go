@@ -92,6 +92,12 @@ type WebpackPlugin struct {
 	fallbackRe *regexp.Regexp
 	// ID -> value 正则
 	idValueRe *regexp.Regexp
+	// webpackChunkMapPatternRe 分支内 hash 映射条目提取（仅在映射表字符串内使用）
+	mapNumericHashRe   *regexp.Regexp
+	mapQuotedKeyHashRe *regexp.Regexp
+	mapIdentKeyHashRe  *regexp.Regexp
+	// webpack 5 极简 runtime 形状识别（用于 Precheck）
+	minimalRuntimeRe *regexp.Regexp
 	// 通用字符串 key -> hex hash 映射正则（用于 webpackRequireUChunkPatternRe 回退）
 	// 匹配 "任意字符串key":"hexhash" 格式，覆盖 chunk-xxx、noprefetch-xxx、vendors~xxx 等
 	stringKeyHashMapRe *regexp.Regexp
@@ -157,7 +163,9 @@ func NewWebpackPlugin() *WebpackPlugin {
 		webpackPublicPathAssignRe: regexp.MustCompile(`\.\w+\s*=\s*(?:function\s*\([^)]*\)\s*\{[^}]*\}|"[^"]*"|[^;,]+)`),
 		// webpack runtime 中 "prefix" + X + "-" + {...}[X] + ".suffix" 模式
 		// 匹配: "js/"+e+"-"+{...}[e]+".js"
-		webpackChunkMapPatternRe: regexp.MustCompile(`"([^"]+)"\s*\+\s*\w+\s*\+\s*"([^"]+)"\s*\+\s*\{([^}]+)\}\[\w+\]\s*\+\s*"([^"]+)"`),
+		webpackChunkMapPatternRe: regexp.MustCompile(`"([^"]*)"\s*\+\s*\w+\s*\+\s*"([^"]*)"\s*\+\s*\(?\{([^}]+)\}\)?\[\w+\]\s*\+\s*"([^"]*)"`),
+		// webpack 5 极简 runtime（无标准标记）: =function(e){return""+e+"."+{..}[e]+".js"}
+		minimalRuntimeRe: regexp.MustCompile(`=\s*function\s*\(\w+\)\s*\{\s*return\s*"[^"]*"\s*\+\s*\w+\s*\+\s*"[^"]*"\s*\+\s*\(?\{[^}]*\}\)?\[\w+\]\s*\+\s*"\.js"`),
 		// h.u=e=>"prefix/"+((nameMap)[e]||e)+"."+(hashMap)[e]+".js" 模式
 		// 匹配: "prefix"+((nameMap)[e]||e)+"."+(hashMap)[e]+".js"
 		webpackStaticChunkPatternRe: regexp.MustCompile(`"([^"]+/)"\s*\+\s*\(\s*\(([^)]+)\)\[\w+\]\s*\|\|\s*\w+\s*\)\s*\+\s*"\."\s*\+\s*\(([^)]+)\)\[\w+\]\s*\+\s*"\.js"`),
@@ -183,6 +191,13 @@ func NewWebpackPlugin() *WebpackPlugin {
 		fallbackRe: regexp.MustCompile(`\+\s*["']([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+/)["']`),
 		// ID -> value 正则
 		idValueRe: regexp.MustCompile(`(\d+):"([^"]+)"`),
+		// webpackChunkMapPatternRe 分支内 hash 映射条目提取（仅在映射表字符串内使用）
+		//   - 数字 key: 153:"3fc109f0"
+		//   - 带引号字符串 key: "page2-extra":"c6724a6f"
+		//   - 无引号 identifier key: src_views_extra_js:"d62b6bd7"
+		mapNumericHashRe:   regexp.MustCompile(`(\d+)\s*:\s*"([a-zA-Z0-9]{3,40})"`),
+		mapQuotedKeyHashRe: regexp.MustCompile(`"([a-zA-Z_][a-zA-Z0-9_.~@\-/]+)"\s*:\s*"([a-zA-Z0-9]{3,40})"`),
+		mapIdentKeyHashRe:  regexp.MustCompile(`([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:\s*"([a-zA-Z0-9]{3,40})"`),
 		// 通用字符串 key -> hex hash 映射（hex 值 5-20 位）
 		// 用于 webpackRequireUChunkPatternRe 回退：当 idValueRe 提取不到数字 key 时，
 		// 用此正则提取所有字符串 key 的 hash 映射（chunk-xxx、noprefetch-xxx、vendors~xxx 等）
@@ -202,7 +217,7 @@ func (p *WebpackPlugin) Precheck(ctx context.Context, input *extractor.AnalyzeIn
 	if input.ContentType != extractor.ContentTypeJS {
 		return false
 	}
-	return bytesContainsAny(input.Content, [][]byte{
+	if bytesContainsAny(input.Content, [][]byte{
 		[]byte("__webpack_require__"),
 		[]byte("webpackJsonp"),
 		[]byte("chunk-"),
@@ -210,7 +225,12 @@ func (p *WebpackPlugin) Precheck(ctx context.Context, input *extractor.AnalyzeIn
 		[]byte("__webpack_public_path__"),
 		[]byte("resourceBaseUrl"),
 		[]byte("webpackChunk_"),
-	})
+	}) {
+		return true
+	}
+	// webpack 5 极简 runtime（如手写夹具）：r.u = function(e){ return ""+e+"."+{2:"x7k2"}[e]+".js" }
+	// 无任何标准 webpack 标记，只靠 chunk URL 构造函数的形状识别
+	return p.minimalRuntimeRe.Match(input.Content)
 }
 
 func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInput) (*extractor.Result, error) {
@@ -223,76 +243,121 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 	}
 
 	// 检查通用 webpack runtime chunk URL 映射模式
-	// 模式: "prefix"+e+"-"+{id:hash}[e]+".suffix"
-	// 例如: l.u=e=>"js/"+e+"-"+{10:"ce0cc4f",...}[e]+".js"
-	// 或: X.u=function(e){return"prefix/"+e+"-"+{id:hash}[e]+".suffix"}
+	// 模式: "prefix"+e+"."+{id:hash,...}[e]+".suffix"
+	// 例如:
+	//   l.u=e=>"js/"+e+"-"+{10:"ce0cc4f",...}[e]+".js"           (数字 key + "-" 分隔)
+	//   s.u=e=>"js/"+e+"."+{"page2-extra":"c6724a6f",...}[e]+".js" (字符串 key + "." 分隔)
+	//   t.u=e=>"static/js/"+e+"."+{153:"3fc109f0",...}[e]+".chunk.js" (cra)
+	//   r.u=function(e){return""+e+"."+{2:"x7k2"}[e]+".js"};      (空前缀，selftest)
 	if chunkMapMatch := p.webpackChunkMapPatternRe.FindStringSubmatch(content); len(chunkMapMatch) > 4 {
-		prefix := chunkMapMatch[1]     // "js/"
-		suffix := chunkMapMatch[4]     // ".js"
+		prefix := chunkMapMatch[1]     // "js/" 或 "static/js/" 或 ""
+		separator := chunkMapMatch[2]  // "." 或 "-"
 		hashMapStr := chunkMapMatch[3] // {10:"ce0cc4f",...}
+		suffix := chunkMapMatch[4]     // ".js" 或 ".chunk.js"
+		if separator == "" {
+			separator = "-"
+		}
 
-		// 从 hashMapStr 中提取所有 id:hash 映射
+		// 从 hashMapStr 中提取 id:hash 映射
+		// key 形式有三种：
+		//   - 数字: 153:"3fc109f0"
+		//   - 带引号字符串: "page2-extra":"c6724a6f"
+		//   - 无引号 identifier: src_views_extra_js:"d62b6bd7"
 		hashMap := make(map[string]string)
-		for _, m := range p.numericHashMapRe.FindAllStringSubmatch(hashMapStr, -1) {
+		for _, m := range p.mapNumericHashRe.FindAllStringSubmatch(hashMapStr, -1) {
+			if len(m) > 2 {
+				hashMap[m[1]] = m[2]
+			}
+		}
+		for _, m := range p.mapQuotedKeyHashRe.FindAllStringSubmatch(hashMapStr, -1) {
+			if len(m) > 2 {
+				hashMap[m[1]] = m[2]
+			}
+		}
+		for _, m := range p.mapIdentKeyHashRe.FindAllStringSubmatch(hashMapStr, -1) {
 			if len(m) > 2 {
 				hashMap[m[1]] = m[2]
 			}
 		}
 
-		// 如果 hashMap 中没有足够的条目，尝试从整个文件中提取
-		if len(hashMap) < 3 {
-			for _, m := range p.numericHashMapRe.FindAllStringSubmatch(content, -1) {
-				if len(m) > 2 {
-					hashMap[m[1]] = m[2]
+		// 有映射条目才生成 chunk URL；为空则继续尝试后续分支
+		if len(hashMap) > 0 {
+			// publicPath 前缀（如 Module Federation remote runtime 的 "/remote/"）：
+			// 拼接后得到根相对路径，probeFragment 的域名兜底逻辑可正确解析到
+			// remote 目录，而不会被同源 host 的 js/ 目录误匹配。
+			pp := ""
+			if len(result.PublicPaths) > 0 {
+				cand := strings.TrimSuffix(result.PublicPaths[0], "/")
+				if cand != "" && strings.HasPrefix(cand, "/") {
+					pp = cand
 				}
 			}
+			// 格式: pp + prefix + chunkID + separator + hash + suffix
+			for chunkID, hash := range hashMap {
+				chunkPath := pp + prefix + chunkID + separator + hash + suffix
+				result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
+					URL:      chunkPath,
+					FromURL:  input.SourceURL,
+					IsInline: false,
+				})
+			}
+			// 通用 webpack runtime chunk 映射已处理
+			return result, nil
 		}
-
-		// 生成所有 chunk URL
-		// 格式: prefix + chunkID + "-" + hash + suffix
-		for chunkID, hash := range hashMap {
-			chunkPath := prefix + chunkID + "-" + hash + suffix
-			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-				URL:      chunkPath,
-				FromURL:  input.SourceURL,
-				IsInline: false,
-			})
-		}
-		// 通用 webpack runtime chunk 映射已处理
-		return result, nil
 	}
 
 	// 检查 h.u=e=>"prefix/"+((nameMap)[e]||e)+"."+(hashMap)[e]+".js" 模式
 	// 格式: "prefix"+((nameMap)[e]||e)+"."+(hashMap)[e]+".js"
+	// rsbuild/rspack 变体把映射表直接内联在函数里：
+	//   (({131:"views-detail",...})[e]||e)+"."+({131:"91d1a7b9",...})[e]+".js"
 	// 生成: prefix/name.hash.js 或 prefix/id.hash.js
 	if staticMatch := p.webpackStaticChunkPatternRe.FindStringSubmatch(content); len(staticMatch) > 3 {
-		prefix := staticMatch[1]     // 路径前缀，如 "static/"
-		nameMapVar := staticMatch[2] // name 映射表变量名
-		hashMapVar := staticMatch[3] // hash 映射表变量名
+		prefix := staticMatch[1]     // 路径前缀，如 "static/js/async/"
+		nameMapVar := staticMatch[2] // name 映射表变量名（或内联字面量 {id:"name",...}）
+		hashMapVar := staticMatch[3] // hash 映射表变量名（或内联字面量 {id:"hash",...}）
 
-		// 从整个内容中搜索 nameMap 和 hashMap 的定义
-		// 格式可能是: var xxx={...} 或 xxx={...}
 		nameMap := make(map[string]string)
 		hashMap := make(map[string]string)
 
-		// 构造搜索模式: 变量名 = {...}
-		nameMapDefRe := regexp.MustCompile(nameMapVar + `\s*=\s*\{([^}]+)\}`)
-		hashMapDefRe := regexp.MustCompile(hashMapVar + `\s*=\s*\{([^}]+)\}`)
-
-		// 提取 nameMap 定义
-		if nameMapMatch := nameMapDefRe.FindStringSubmatch(content); len(nameMapMatch) > 1 {
-			for _, m := range p.idValueRe.FindAllStringSubmatch(nameMapMatch[1], -1) {
+		// 内联字面量映射（rsbuild 等打包器直接内联在 u 函数里）
+		if strings.HasPrefix(strings.TrimSpace(nameMapVar), "{") {
+			for _, m := range p.idValueRe.FindAllStringSubmatch(nameMapVar, -1) {
 				if len(m) > 2 {
 					nameMap[m[1]] = m[2]
 				}
 			}
 		}
-
-		// 提取 hashMap 定义
-		if hashMapMatch := hashMapDefRe.FindStringSubmatch(content); len(hashMapMatch) > 1 {
-			for _, m := range p.idValueRe.FindAllStringSubmatch(hashMapMatch[1], -1) {
+		if strings.HasPrefix(strings.TrimSpace(hashMapVar), "{") {
+			for _, m := range p.mapNumericHashRe.FindAllStringSubmatch(hashMapVar, -1) {
 				if len(m) > 2 {
 					hashMap[m[1]] = m[2]
+				}
+			}
+		}
+
+		// 变量名形式: 从整个内容中搜索 nameMap 和 hashMap 的定义
+		// 格式可能是: var xxx={...} 或 xxx={...}
+		if !strings.HasPrefix(strings.TrimSpace(nameMapVar), "{") &&
+			!strings.HasPrefix(strings.TrimSpace(hashMapVar), "{") {
+			// 构造搜索模式: 变量名 = {...}
+			nameMapDefRe := regexp.MustCompile(nameMapVar + `\s*=\s*\{([^}]+)\}`)
+			hashMapDefRe := regexp.MustCompile(hashMapVar + `\s*=\s*\{([^}]+)\}`)
+
+			// 提取 nameMap 定义
+			if nameMapMatch := nameMapDefRe.FindStringSubmatch(content); len(nameMapMatch) > 1 {
+				for _, m := range p.idValueRe.FindAllStringSubmatch(nameMapMatch[1], -1) {
+					if len(m) > 2 {
+						nameMap[m[1]] = m[2]
+					}
+				}
+			}
+
+			// 提取 hashMap 定义
+			if hashMapMatch := hashMapDefRe.FindStringSubmatch(content); len(hashMapMatch) > 1 {
+				for _, m := range p.idValueRe.FindAllStringSubmatch(hashMapMatch[1], -1) {
+					if len(m) > 2 {
+						hashMap[m[1]] = m[2]
+					}
 				}
 			}
 		}

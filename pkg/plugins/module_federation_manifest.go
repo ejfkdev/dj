@@ -65,6 +65,14 @@ func (p *ModuleFederationManifestPlugin) Analyze(ctx context.Context, input *ext
 
 	// 处理 JSON content - 直接解析 manifest
 	if input.ContentType == extractor.ContentTypeJSON {
+		// 标准 Module Federation manifest：exposes[].assets.js.{sync,async}
+		// + metaData.publicPath（@module-federation 新版格式）
+		if stdURLs := p.parseStandardMFManifest(input.SourceURL, input.Content); len(stdURLs) > 0 {
+			result.URLs = append(result.URLs, stdURLs...)
+			return result, nil
+		}
+
+		// 旧格式（Vmok/飞书风格 region + static/js chunks）
 		manifestResult, err := ParseVmokManifest(input.Content)
 		if err != nil || len(manifestResult.Chunks) == 0 {
 			return result, nil
@@ -126,6 +134,79 @@ func (p *ModuleFederationManifestPlugin) Analyze(ctx context.Context, input *ext
 	})
 
 	return result, nil
+}
+
+// 标准 Module Federation manifest JSON 结构（@module-federation/enhanced）
+type stdMFAssetsJS struct {
+	Sync  []string `json:"sync"`
+	Async []string `json:"async"`
+}
+
+type stdMFAssets struct {
+	JS stdMFAssetsJS `json:"js"`
+}
+
+type stdMFExpose struct {
+	Assets stdMFAssets `json:"assets"`
+}
+
+type stdMFManifest struct {
+	MetaData struct {
+		PublicPath string `json:"publicPath"`
+	} `json:"metaData"`
+	Exposes []stdMFExpose `json:"exposes"`
+}
+
+// parseStandardMFManifest 解析标准 MF manifest，返回 exposes 引用的 chunk 绝对 URL。
+// publicPath 可能是相对路径（"/remote/"）或完整 URL，chunk 路径相对 publicPath 解析。
+func (p *ModuleFederationManifestPlugin) parseStandardMFManifest(sourceURL string, content []byte) []extractor.DiscoveredJS {
+	var mf stdMFManifest
+	if err := json.Unmarshal(content, &mf); err != nil {
+		return nil
+	}
+	if len(mf.Exposes) == 0 {
+		return nil
+	}
+
+	publicPath := mf.MetaData.PublicPath
+	if publicPath == "" {
+		publicPath = "/"
+	}
+	if !strings.HasSuffix(publicPath, "/") {
+		publicPath += "/"
+	}
+
+	var urls []extractor.DiscoveredJS
+	seen := make(map[string]bool)
+	add := func(chunk string) {
+		if chunk == "" || seen[chunk] {
+			return
+		}
+		// 先拼 publicPath 再相对 manifest URL 解析
+		full := publicPath + chunk
+		absoluteURL := extractor.ResolveRelativePath(sourceURL, full)
+		absoluteURL = extractor.NormalizeURL(absoluteURL)
+		if !extractor.IsAbsoluteURL(absoluteURL) || seen[absoluteURL] {
+			return
+		}
+		seen[absoluteURL] = true
+		seen[chunk] = true
+		urls = append(urls, extractor.DiscoveredJS{
+			URL:      absoluteURL,
+			FromURL:  sourceURL,
+			IsInline: false,
+		})
+	}
+
+	for _, expose := range mf.Exposes {
+		for _, chunk := range expose.Assets.JS.Sync {
+			add(chunk)
+		}
+		for _, chunk := range expose.Assets.JS.Async {
+			add(chunk)
+		}
+	}
+	return urls
 }
 
 // extractBaseHost 从 JS 内容中提取 baseHost 的值

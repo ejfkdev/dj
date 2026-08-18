@@ -48,7 +48,7 @@ func NewUniversalURLPlugin() *UniversalURLPlugin {
 		// 兼容单引号/双引号/无引号（无引号在 HTML 里少见，先不处理）
 		scriptSrcRe: regexp.MustCompile(`<script\b[^>]*\bsrc\s*=\s*["']([^"']+\.js[^"']*)["']`),
 		// import("path") 动态 import
-		importRe: regexp.MustCompile(`\bimport\s*\(\s*["']([^"']+\.js)["']`),
+		importRe: regexp.MustCompile("\\bimport\\s*\\(\\s*[\"'`]([^\"'`]+\\.js)[\"'`]"),
 		// require("path") CommonJS
 		requireRe: regexp.MustCompile(`\brequire\s*\(\s*["']([^"']+\.js)["']`),
 		// loader!path 或 !path 形式 (webpack 等)
