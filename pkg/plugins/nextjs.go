@@ -84,7 +84,9 @@ func (p *NextJSPlugin) Precheck(ctx context.Context, input *extractor.AnalyzeInp
 			strings.Contains(content, "_next/static") ||
 			strings.Contains(content, "next/dist") ||
 			strings.Contains(content, "s.u=") ||
-			strings.Contains(content, "turbopack")
+			strings.Contains(content, "turbopack") ||
+			strings.Contains(content, "__BUILD_MANIFEST") ||
+			strings.Contains(content, "__SSG_MANIFEST")
 	}
 	return false
 }
@@ -106,22 +108,13 @@ func (p *NextJSPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInpu
 
 // analyzeHTML 分析 HTML 内容
 func (p *NextJSPlugin) analyzeHTML(input *extractor.AnalyzeInput, result *extractor.Result, content string) (*extractor.Result, error) {
-	// 提取 buildId
+	// 提取 buildId。
+	// 注意：静态导出 HTML 里内联 __next_f 数据被 JSON 转义过
+	// （"b":"3He7..."），先把常用的 /unicode 还原再匹配。
 	var buildId string
-	for _, match := range p.buildIdRe.FindAllSubmatch(input.Content, -1) {
-		if len(match) < 2 {
-			continue
-		}
-		buildId = string(match[1])
-		if buildId != "" {
-			result.PublicPaths = append(result.PublicPaths, buildId)
-		}
-		break
-	}
-
-	// 从 HTML 注释或 __next_f 数据中提取 buildId（Turbopack 格式）
-	if buildId == "" {
-		for _, match := range p.flightBuildRe.FindAllSubmatch(input.Content, -1) {
+	decodedHTML := extractor.DecodeContent(content)
+	for _, re := range []*regexp.Regexp{p.buildIdRe, p.flightBuildRe} {
+		for _, match := range re.FindAllStringSubmatch(decodedHTML, -1) {
 			if len(match) < 2 {
 				continue
 			}
@@ -129,6 +122,9 @@ func (p *NextJSPlugin) analyzeHTML(input *extractor.AnalyzeInput, result *extrac
 			if buildId != "" {
 				result.PublicPaths = append(result.PublicPaths, buildId)
 			}
+			break
+		}
+		if buildId != "" {
 			break
 		}
 	}
@@ -671,11 +667,9 @@ func (p *NextJSPlugin) extractBuildManifest(input *extractor.AnalyzeInput, resul
 		pagePath := match[1]
 		chunkList := match[2]
 
-		// 跳过内部路径
-		if strings.HasPrefix(pagePath, "/_") {
-			continue
-		}
-		// 跳过非路由字段
+		// 静态导出（output:export / turbopack）的 _buildManifest 里只有
+		// /_app、/_error 两个页面条目，不能跳过；纯内部字段（__rewrites 等）
+		// 不是 /xxx 路由，跳过即可。
 		if !strings.HasPrefix(pagePath, "/") {
 			continue
 		}
@@ -689,25 +683,30 @@ func (p *NextJSPlugin) extractBuildManifest(input *extractor.AnalyzeInput, resul
 			})
 		}
 
-		// 提取 chunk 路径
-		for _, cm := range p.chunkPathRe.FindAllStringSubmatch(chunkList, -1) {
+		// 提取 chunk 路径。manifest 里的路径是根相对形式
+		// （static/chunks/pages/_app.js 等），运行时以 /_next/ 为基准。
+		chunkPathRe := regexp.MustCompile(`"([^"]+\.js)"`)
+		for _, cm := range chunkPathRe.FindAllStringSubmatch(chunkList, -1) {
 			if len(cm) < 2 {
 				continue
 			}
-			path := cm[1]
-			absoluteURL := extractor.ResolveRelativePath(input.SourceURL, path)
+			path := strings.TrimPrefix(cm[1], "/")
+			// 主要候选：/_next/ + path
+			if baseURL != "" {
+				result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
+					URL:      baseURL + "/_next/" + path,
+					FromURL:  input.SourceURL,
+					IsInline: false,
+				})
+			}
+			// 备用候选：相对 manifest URL 直接解析
+			absoluteURL := extractor.ResolveRelativePath(input.SourceURL, cm[1])
 			absoluteURL = extractor.NormalizeURL(absoluteURL)
-
 			if extractor.IsAbsoluteURL(absoluteURL) {
 				result.URLs = append(result.URLs, extractor.DiscoveredJS{
 					URL:      absoluteURL,
 					FromURL:  input.SourceURL,
 					IsInline: false,
-				})
-			} else {
-				result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
-					URL:     path,
-					FromURL: input.SourceURL,
 				})
 			}
 		}

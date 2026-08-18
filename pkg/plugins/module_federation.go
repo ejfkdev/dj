@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -88,6 +89,19 @@ func (p *ModuleFederationPlugin) Analyze(ctx context.Context, input *extractor.A
 			dir := entryURL[:idx+1]
 			for _, name := range []string{"mf-manifest.json", "federation-manifest.json"} {
 				addPath(dir + name)
+			}
+			// vite 布局约定：remoteEntry 位于 <app>/assets/remoteEntry.js 时，
+			// remote 自己的入口 HTML 固定在 <app>/index.html（固定文件名探测，
+			// 非目录列表），用于牵连出只在该 HTML 中引用的 remote 入口 chunk。
+			if parsed, pErr := url.Parse(entryURL); pErr == nil {
+				segs := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+				if len(segs) == 3 && segs[1] == "assets" {
+					htmlURL := parsed.Scheme + "://" + parsed.Host + "/" + segs[0] + "/index.html"
+					result.Intermediates = append(result.Intermediates, extractor.Intermediate{
+						URL:  htmlURL,
+						Type: extractor.ContentTypeHTML,
+					})
+				}
 			}
 		}
 	}
