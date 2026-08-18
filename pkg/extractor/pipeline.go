@@ -77,6 +77,9 @@ type Pipeline struct {
 	// HTML 中间入口的全局预算计数（防多页/iframe 递归爆炸）
 	htmlPivotCount int64
 
+	// EMP 联邦清单兜底探测只触发一次
+	empFallbackFired bool
+
 	// 每个 JS URL 还原出的源码文件数（key: JS URL, value: 还原文件数）
 	// 用于 meta.json 条目级记录 sources_restored / restored_source_count
 	restoredCountMu sync.Mutex
@@ -274,6 +277,11 @@ func (p *Pipeline) Run(ctx context.Context, startURL string) ([]string, error) {
 				hasMoreTasks = len(p.tasks) > 0 || len(p.fragments) > 0
 				p.taskMu.Unlock()
 				if !hasMoreTasks {
+					// 最终兜底：所有插件都没发现 HTML 内嵌脚本以外的动态 JS 时，
+					// 尝试一次 EMP 联邦清单（emp.json / emp-stats.json）。
+					if p.tryEmpFallbackIfNoDynamics() {
+						continue
+					}
 					break
 				}
 			}
@@ -303,6 +311,47 @@ func (p *Pipeline) Run(ctx context.Context, startURL string) ([]string, error) {
 
 	// 返回所有发现的 JS URL
 	return p.knowledge.GetKnownPaths(), nil
+}
+
+// tryEmpFallbackIfNoDynamics 当本轮发现里没有 HTML 内嵌脚本以外的
+// 动态 JS 时（FromPlugin != HTMLScriptPlugin 的条目数为 0），探测一次
+// EMP 联邦清单作为最后的约定式兜底。全程只触发一次；清单 404 或
+// 解析不出内容无害（每个名字至多一次请求）。
+// 返回 true 表示已入队新任务，主发现循环应继续。
+func (p *Pipeline) tryEmpFallbackIfNoDynamics() bool {
+	if p.empFallbackFired {
+		return false
+	}
+	dynamic := 0
+	p.jsURLsMu.Lock()
+	for _, js := range p.jsURLs {
+		if js.FromPlugin != "" && js.FromPlugin != "HTMLScriptPlugin" {
+			dynamic++
+		}
+	}
+	p.jsURLsMu.Unlock()
+	if dynamic > 0 {
+		return false
+	}
+	p.empFallbackFired = true
+	base := GetBaseURL(p.baseURL)
+	if base == "" {
+		return false
+	}
+	enqueued := false
+	for _, name := range []string{"emp.json", "emp-stats.json"} {
+		target := base + "/" + name
+		if p.knowledge.IsSeenURL(target) {
+			continue
+		}
+		p.knowledge.MarkSeenURL(target)
+		p.tryEnqueue(target, &DiscoveredJS{URL: target, FromPlugin: "FallbackEmp"})
+		enqueued = true
+		if p.Debug {
+			p.debugLog("FallbackEmp: probe %s (no dynamic JS found beyond HTML scripts)", target)
+		}
+	}
+	return enqueued
 }
 
 // tryEnqueue 安全地添加 URL 到队列，返回是否成功
@@ -2050,6 +2099,20 @@ func (p *Pipeline) GetOutputResult() *OutputResult {
 		},
 		JSURLs: jsURLList,
 	}
+
+	// 来源上下文：每个 JS 的发现来源文件 + 发现插件 + 是否内联
+	p.jsURLsMu.Lock()
+	jsDetails := make([]JSDetail, 0, len(p.jsURLs))
+	for _, js := range p.jsURLs {
+		jsDetails = append(jsDetails, JSDetail{
+			URL:        js.URL,
+			FromURL:    js.FromURL,
+			FromPlugin: js.FromPlugin,
+			IsInline:   js.IsInline,
+		})
+	}
+	p.jsURLsMu.Unlock()
+	result.JSDetails = jsDetails
 
 	// 设置缓存目录（save-only 模式下也输出，因为文件已写入磁盘）
 	if p.cacheConfig != nil && p.cacheConfig.CanWrite() && p.baseURL != "" {

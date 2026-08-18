@@ -248,6 +248,10 @@ dj https://demo.1panel.cn
 Source Map 支持：通过 `sourceMappingURL` 注释、HTTP 响应头或内联 data URI 自动探测。
 
 ## 输出格式
+`-f json` output includes a `jsDetails` array with per-JS provenance
+(discovered-by plugin, source URL, inline flag); `meta.json` records the same
+via `source_url` / `from_plugin`.
+
 
 ### Text（默认）
 

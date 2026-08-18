@@ -15,10 +15,19 @@ const (
 	FormatMD   OutputFormat = "md"
 )
 
+// JSDetail 单个 JS 的来源上下文：从哪里发现、哪个插件发现、是否内联
+type JSDetail struct {
+	URL        string `json:"url"`
+	FromURL    string `json:"from_url,omitempty"`
+	FromPlugin string `json:"from_plugin,omitempty"`
+	IsInline   bool   `json:"is_inline,omitempty"`
+}
+
 // OutputResult 输出结果结构
 type OutputResult struct {
 	Summary    Summary    `json:"summary"`
 	JSURLs     []string   `json:"jsURLs"`
+	JSDetails  []JSDetail `json:"jsDetails,omitempty"`
 	CacheBase  string     `json:"cacheBase,omitempty"`
 	CacheDirs  *CacheDirs `json:"cacheDirs,omitempty"`
 	OutputDir  string     `json:"outputDir,omitempty"`
@@ -99,6 +108,24 @@ func formatMD(result *OutputResult) string {
 		sb.WriteString("- ")
 		sb.WriteString(url)
 		sb.WriteString("\n")
+	}
+
+	// 来源上下文：每个 JS 从哪个文件、被哪个插件发现
+	if len(result.JSDetails) > 0 {
+		sb.WriteString("\n## JS Provenance\n")
+		sb.WriteString("| JS | discovered by | from | inline |\n")
+		sb.WriteString("|----|---------------|------|--------|\n")
+		for _, d := range result.JSDetails {
+			from := d.FromURL
+			if from == "" {
+				from = "—"
+			}
+			inline := ""
+			if d.IsInline {
+				inline = "yes"
+			}
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", d.URL, d.FromPlugin, from, inline))
+		}
 	}
 
 	sb.WriteString("\n## Cache Directories\n")

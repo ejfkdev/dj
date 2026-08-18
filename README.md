@@ -234,6 +234,10 @@ When caching is enabled (default), the second run on the same site skips network
 - Use `--no-cache` to force a full re-scan (files are still saved to disk, just not read from cache)
 
 ## Output formats
+`-f json` output includes a `jsDetails` array with per-JS provenance
+(discovered-by plugin, source URL, inline flag); `meta.json` records the same
+via `source_url` / `from_plugin`.
+
 
 ### Text (default)
 
