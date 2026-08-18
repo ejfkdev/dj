@@ -74,6 +74,9 @@ type Pipeline struct {
 	// 还原出的源码文件计数（用于输出统计）
 	sourceCount int64
 
+	// HTML 中间入口的全局预算计数（防多页/iframe 递归爆炸）
+	htmlPivotCount int64
+
 	// 每个 JS URL 还原出的源码文件数（key: JS URL, value: 还原文件数）
 	// 用于 meta.json 条目级记录 sources_restored / restored_source_count
 	restoredCountMu sync.Mutex
@@ -103,6 +106,30 @@ func NewPipeline(reg *PluginRegistry) *Pipeline {
 		restoredCount:   make(map[string]int),
 		restoredSources: make(map[string][]string),
 	}
+}
+
+// maxHTMLPivots HTML 中间入口（多页/iframe 递归提取）的全局预算。
+// 超过后不再入队新页面，防止超大站点爬取爆炸；配合 IsSeenURL 的
+// URL 级去重，重复解析同一 URL 不会发生。
+const maxHTMLPivots = 64
+
+// enqueueIntermediate 中间资源入队。HTML 类型受全局预算约束；
+// 所有类型都经过 knowledge.IsSeenURL 去重（同一 URL 只解析一次）。
+func (p *Pipeline) enqueueIntermediate(intermediate Intermediate, fromPlugin string) {
+	normalizedURL := NormalizeURL(intermediate.URL)
+	if p.knowledge.IsSeenURL(normalizedURL) {
+		return
+	}
+	if intermediate.Type == ContentTypeHTML {
+		if atomic.LoadInt64(&p.htmlPivotCount) >= maxHTMLPivots {
+			if p.Debug {
+				p.debugLog("HTML pivot budget exhausted, skip: %s", normalizedURL)
+			}
+			return
+		}
+		atomic.AddInt64(&p.htmlPivotCount, 1)
+	}
+	p.tryEnqueue(normalizedURL, &DiscoveredJS{URL: normalizedURL, FromPlugin: fromPlugin})
 }
 
 // SetCacheConfig 设置缓存配置
@@ -1462,11 +1489,7 @@ func (p *Pipeline) processResults(ctx context.Context, results []*Result, source
 
 		// 处理中间资源
 		for _, intermediate := range r.Intermediates {
-			normalizedURL := NormalizeURL(intermediate.URL)
-			if !p.knowledge.IsSeenURL(normalizedURL) {
-				// Intermediates 是配置文件，记录发现它的插件名
-				p.tryEnqueue(normalizedURL, &DiscoveredJS{URL: normalizedURL, FromPlugin: r.FromPlugin})
-			}
+			p.enqueueIntermediate(intermediate, r.FromPlugin)
 		}
 
 		// 处理内联脚本 - 直接分发给所有插件分析
@@ -1585,11 +1608,7 @@ func (p *Pipeline) processInlineResults(results []*Result, sourceURL string) {
 
 		// 处理中间资源
 		for _, intermediate := range r.Intermediates {
-			normalizedURL := NormalizeURL(intermediate.URL)
-			if !p.knowledge.IsSeenURL(normalizedURL) {
-				// Intermediates 是配置文件，记录发现它的插件名
-				p.tryEnqueue(normalizedURL, &DiscoveredJS{URL: normalizedURL, FromPlugin: r.FromPlugin})
-			}
+			p.enqueueIntermediate(intermediate, r.FromPlugin)
 		}
 
 		// 不再递归处理 InlineScripts，避免迭代爆炸
