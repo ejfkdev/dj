@@ -11,6 +11,8 @@ import (
 
 // NextJSPlugin 提取 Next.js 相关资源
 type NextJSPlugin struct {
+	// Turbopack chunk 头依赖数组 otherChunks:[...]
+	otherChunksRe *regexp.Regexp
 	buildIdRe     *regexp.Regexp
 	assetPrefixRe *regexp.Regexp
 	nextDataRe    *regexp.Regexp
@@ -32,6 +34,7 @@ type NextJSPlugin struct {
 // NewNextJSPlugin 创建插件
 func NewNextJSPlugin() *NextJSPlugin {
 	return &NextJSPlugin{
+		otherChunksRe: regexp.MustCompile(`otherChunks\s*:\s*\[([^\]]+)\]`),
 		// buildId 提取: "buildId":"v0.16.3-community"
 		buildIdRe: regexp.MustCompile(`"buildId"\s*:\s*"([^"]+)"`),
 		// assetPrefix 提取: https://cdn.example.com/_next
@@ -483,7 +486,43 @@ func (p *NextJSPlugin) analyzeJS(input *extractor.AnalyzeInput, result *extracto
 		p.extractBuildManifest(input, result, content)
 	}
 
+	// Turbopack otherChunks 依赖数组（chunk 之间的直接引用闭包）
+	if strings.Contains(content, "otherChunks") {
+		p.extractTurbopackOtherChunks(input, result, content)
+	}
+
 	return result, nil
+}
+
+// extractTurbopackOtherChunks 提取 Turbopack chunk 头里的依赖数组：
+//
+//	otherChunks:["static/chunks/2389936670fe100e.js","static/chunks/ed8faf8ccd04feb5.js"]
+//
+// 这些路径是根相对（/_next/ 下），按 origin 拼接探测。
+func (p *NextJSPlugin) extractTurbopackOtherChunks(input *extractor.AnalyzeInput, result *extractor.Result, content string) {
+	quotedJSRe := regexp.MustCompile(`["']([^"']+\.js)["']`)
+	for _, m := range p.otherChunksRe.FindAllStringSubmatch(content, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		for _, q := range quotedJSRe.FindAllStringSubmatch(m[1], -1) {
+			if len(q) < 2 {
+				continue
+			}
+			rel := strings.TrimPrefix(q[1], "/")
+			if !strings.HasPrefix(rel, "static/") {
+				continue
+			}
+			origin := extractor.GetBaseURL(input.SourceURL)
+			if origin != "" {
+				result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
+					URL:      origin + "/_next/" + rel,
+					FromURL:  input.SourceURL,
+					IsInline: false,
+				})
+			}
+		}
+	}
 }
 
 // extractNextJSChunks 提取 Next.js s.u=e=> 格式的 chunk 映射

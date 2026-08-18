@@ -39,6 +39,10 @@ type UniversalURLPlugin struct {
 	sysRegisterRe *regexp.Regexp
 	// 9. 数组中引号字符串片段
 	quotedRe *regexp.Regexp
+	// 10. 变量跟踪：var/const/let 字符串常量与 import(变量)/拼接引用
+	constAssignRe  *regexp.Regexp
+	concatAssignRe *regexp.Regexp
+	importVarRe    *regexp.Regexp
 }
 
 // NewUniversalURLPlugin 创建插件
@@ -62,6 +66,10 @@ func NewUniversalURLPlugin() *UniversalURLPlugin {
 		// System.register(['./dynamic/dep/shared-xxx.js', ...], ...)
 		sysRegisterRe: regexp.MustCompile(`System\.register\s*\(\s*\[([^\]]+)\]`),
 		quotedRe:      regexp.MustCompile(`["']([^"']+\.js[^"']*)["']`),
+		// 变量跟踪三件套：常量赋值、常量拼接、import(变量)
+		constAssignRe:  regexp.MustCompile(`(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*["']([^"']{1,200})["']`),
+		concatAssignRe: regexp.MustCompile(`([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*\+\s*["']([^"']{1,200})["']`),
+		importVarRe:    regexp.MustCompile(`\bimport\s*\(\s*([A-Za-z_$][\w$]*)\s*\)`),
 	}
 }
 
@@ -166,6 +174,40 @@ func (p *UniversalURLPlugin) Analyze(ctx context.Context, input *extractor.Analy
 		for _, q := range p.quotedRe.FindAllStringSubmatch(m[1], -1) {
 			if len(q) > 1 {
 				add(q[1])
+			}
+		}
+	}
+	// 7b. 变量跟踪：常量传播 + import(变量) 解引用，多遍匹配至收敛
+	//     覆盖运行时拼接 URL 的场景：
+	//       var r="/remote/remoteEntry.js"; import(r)
+	//       const base="https://cdn.x.com/"; const path=base+"app.js"; import(path)
+	constMap := make(map[string]string)
+	for _, m := range p.constAssignRe.FindAllStringSubmatch(decoded, -1) {
+		if len(m) > 2 {
+			constMap[m[1]] = m[2]
+		}
+	}
+	for pass := 0; pass < 3; pass++ {
+		changed := false
+		for _, m := range p.concatAssignRe.FindAllStringSubmatch(decoded, -1) {
+			if len(m) > 3 {
+				if base, ok := constMap[m[2]]; ok {
+					val := base + m[3]
+					if constMap[m[1]] != val {
+						constMap[m[1]] = val
+						changed = true
+					}
+				}
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	for _, m := range p.importVarRe.FindAllStringSubmatch(decoded, -1) {
+		if len(m) > 1 {
+			if val, ok := constMap[m[1]]; ok {
+				add(val)
 			}
 		}
 	}
