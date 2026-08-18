@@ -41,6 +41,30 @@ func NormalizeURL(rawURL string) string {
 	return u.String()
 }
 
+// RebaseLoopbackOrigin 将 loopback 绝对地址（127.0.0.1 / localhost，端口与来源
+// 页面不同）重映射到来源页面的 origin，路径不变。覆盖"构建期把 dev server
+// 地址烧进产物、扫描期跑在另一端口"的同源镜像部署场景。
+// 目标非 loopback、或与来源同源时返回原值。
+func RebaseLoopbackOrigin(rawURL, sourceURL string) string {
+	target, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	targetHostname := target.Hostname()
+	if targetHostname != "127.0.0.1" && targetHostname != "localhost" {
+		return rawURL
+	}
+	src, err := url.Parse(sourceURL)
+	if err != nil || src.Host == "" {
+		return rawURL
+	}
+	if target.Host == src.Host {
+		return rawURL
+	}
+	target.Scheme, target.Host = src.Scheme, src.Host
+	return target.String()
+}
+
 // GetDirFromURL 获取 URL 的目录部分
 func GetDirFromURL(u string) string {
 	parsed, err := url.Parse(u)

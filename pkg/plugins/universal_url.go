@@ -39,7 +39,11 @@ type UniversalURLPlugin struct {
 	sysRegisterRe *regexp.Regexp
 	// 9. 数组中引号字符串片段
 	quotedRe *regexp.Regexp
-	// 10. 变量跟踪：var/const/let 字符串常量与 import(变量)/拼接引用
+	// 10. 函数调用字面量参数: j("/remote/assets/x.js") 风格（vite federation
+	//    的远程模块加载器、其它自定义 loader 的调用点）
+	callArgRe *regexp.Regexp
+
+	// 11. 变量跟踪：var/const/let 字符串常量与 import(变量)/拼接引用
 	constAssignRe  *regexp.Regexp
 	concatAssignRe *regexp.Regexp
 	importVarRe    *regexp.Regexp
@@ -66,6 +70,8 @@ func NewUniversalURLPlugin() *UniversalURLPlugin {
 		// System.register(['./dynamic/dep/shared-xxx.js', ...], ...)
 		sysRegisterRe: regexp.MustCompile(`System\.register\s*\(\s*\[([^\]]+)\]`),
 		quotedRe:      regexp.MustCompile(`["']([^"']+\.js[^"']*)["']`),
+		// 函数调用带绝对路径 .js 参数
+		callArgRe: regexp.MustCompile(`\b\w+\s*\(\s*["\'](/[^"\']+\.js[^"\']*)["\']`),
 		// 变量跟踪三件套：常量赋值、常量拼接、import(变量)
 		constAssignRe:  regexp.MustCompile(`(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*["']([^"']{1,200})["']`),
 		concatAssignRe: regexp.MustCompile(`([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*\+\s*["']([^"']{1,200})["']`),
@@ -175,6 +181,12 @@ func (p *UniversalURLPlugin) Analyze(ctx context.Context, input *extractor.Analy
 			if len(q) > 1 {
 				add(q[1])
 			}
+		}
+	}
+	// 7a. 函数调用字面量参数（j("/remote/assets/x.js") 等自定义 loader 调用点）
+	for _, m := range p.callArgRe.FindAllStringSubmatch(decoded, -1) {
+		if len(m) > 1 {
+			add(m[1])
 		}
 	}
 	// 7b. 变量跟踪：常量传播 + import(变量) 解引用，多遍匹配至收敛

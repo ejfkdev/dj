@@ -33,7 +33,8 @@ func (p *ESMImportPlugin) Precheck(ctx context.Context, input *extractor.Analyze
 	if input.ContentType != extractor.ContentTypeJS {
 		return false
 	}
-	return bytes.Contains(input.Content, []byte("import "))
+	// minified 产物可能是 import{..}from".."（import 后无空格）
+	return bytes.Contains(input.Content, []byte("import"))
 }
 
 func (p *ESMImportPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInput) (*extractor.Result, error) {

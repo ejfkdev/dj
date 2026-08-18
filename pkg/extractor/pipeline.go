@@ -360,6 +360,20 @@ func (p *Pipeline) tryEnqueue(url string, discovered *DiscoveredJS) bool {
 	p.taskMu.Lock()
 	defer p.taskMu.Unlock()
 
+	// 开发期绝对地址重定向：构建产物里可能烧进 localhost 开发服务器的
+	// 绝对 URL（如 http://127.0.0.1:50315/remote/remoteEntry.js）。扫描时
+	// 站点跑在另一端口，把 loopback 目标地址重映射到扫描点源端口，
+	// 路径保持不变。只以扫描起始 URL（baseURL）为锚——发现链上游的
+	// FromURL 本身也可能是老端口产物，不能作为锚。
+	if p.baseURL != "" {
+		if rebased := RebaseLoopbackOrigin(url, p.baseURL); rebased != url {
+			if p.Debug {
+				p.debugLog("tryEnqueue: rebase loopback %s -> %s", url, rebased)
+			}
+			url = rebased
+		}
+	}
+
 	// 在锁内检查，避免竞态
 	if p.knowledge.IsSeenURL(url) {
 		return false
@@ -369,9 +383,13 @@ func (p *Pipeline) tryEnqueue(url string, discovered *DiscoveredJS) bool {
 	p.tasks = append(p.tasks, url)
 
 	// 存储上下文到 urlContext map（用于后续添加 jsURLs 时获取）
+	// 注意：URL 字段必须同步为重定向后的实际入队值，否则下游
+	// processJSContent 会拿旧 URL 去下载
 	if discovered != nil {
+		ctxCopy := *discovered
+		ctxCopy.URL = url
 		p.urlContextMu.Lock()
-		p.urlContext[url] = *discovered
+		p.urlContext[url] = ctxCopy
 		p.urlContextMu.Unlock()
 	}
 
@@ -1136,6 +1154,11 @@ func (p *Pipeline) processFragment(ctx context.Context, discovered DiscoveredJS)
 
 	// 为每个候选启动 goroutine 处理
 	for _, candidateURL := range candidateURLs {
+		// loopback 开发地址重定向（与 tryEnqueue 一致，但本路径绕过 tryEnqueue）。
+		// 只以 baseURL 为锚（上游 FromURL 可能是老端口产物）。
+		if p.baseURL != "" {
+			candidateURL = RebaseLoopbackOrigin(candidateURL, p.baseURL)
+		}
 		normalizedURL := NormalizeURL(candidateURL)
 
 		// 去重：与 tryEnqueue 一致，依赖 knowledge.IsSeenURL 避免同一 URL 被并发处理多次
@@ -1172,6 +1195,11 @@ func (p *Pipeline) processFragment(ctx context.Context, discovered DiscoveredJS)
 
 // processJSContentURL 处理单个 URL 的完整流程（由 goroutine 直接调用）
 func (p *Pipeline) processJSContentURL(ctx context.Context, urlStr string) {
+	// loopback 开发地址重定向（最终兜底：所有入队路径都在此汇聚，
+	// 彻底堵住老端口产物 URL 进入下载器）
+	if p.baseURL != "" {
+		urlStr = RebaseLoopbackOrigin(urlStr, p.baseURL)
+	}
 	normalizedURL := NormalizeURL(urlStr)
 
 	// 查找上下文
@@ -1827,9 +1855,12 @@ func (p *Pipeline) probeFragment(fragment, sourceURL string) []string {
 		}
 	}
 
-	// 如果 fragment 有路径但没有匹配的 knownPath，尝试用所有已知域名组合
-	// 这处理 webpack runtime 生成的 chunk 路径（如 static/js/chunk-xxx.hash.js）
-	if fragmentHasPath && len(candidates) == 0 {
+	// 领域里含路径的 fragment：除了 knownPath 后缀匹配外，还要始终尝试
+	// 根相对拼接（domain + fullPath）——knownPath 可能先匹配到 remote 等
+	// 同名目录（mf-rsbuild 的 host/remote 双 async 目录同构场景），
+	// 导致 host 侧候选被错过。
+	// 兼容"webpack runtime 生成的 chunk 路径"（如 static/js/chunk-xxx.hash.js）
+	if fragmentHasPath {
 		if p.Debug {
 			p.debugLog("probeFragment: no knownPath match, trying all known domains, fragmentPath=%s, fragmentFile=%s", fragmentPath, fragmentFile)
 		}
