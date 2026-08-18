@@ -96,6 +96,11 @@ type WebpackPlugin struct {
 	mapNumericHashRe   *regexp.Regexp
 	mapQuotedKeyHashRe *regexp.Regexp
 	mapIdentKeyHashRe  *regexp.Regexp
+	// 字符串键映射（值任意，供 name/hash 分离使用）
+	mapQuotedKeyValueRe *regexp.Regexp
+	mapIdentKeyValueRe  *regexp.Regexp
+	// Gatsby 三元特判 + hash 映射（无引号前缀变体）
+	ternaryNameMapRe *regexp.Regexp
 	// webpack 5 极简 runtime 形状识别（用于 Precheck）
 	minimalRuntimeRe *regexp.Regexp
 	// 通用字符串 key -> hex hash 映射正则（用于 webpackRequireUChunkPatternRe 回退）
@@ -195,9 +200,12 @@ func NewWebpackPlugin() *WebpackPlugin {
 		//   - 数字 key: 153:"3fc109f0"
 		//   - 带引号字符串 key: "page2-extra":"c6724a6f"
 		//   - 无引号 identifier key: src_views_extra_js:"d62b6bd7"
-		mapNumericHashRe:   regexp.MustCompile(`(\d+)\s*:\s*"([a-zA-Z0-9]{3,40})"`),
-		mapQuotedKeyHashRe: regexp.MustCompile(`"([a-zA-Z_][a-zA-Z0-9_.~@\-/]+)"\s*:\s*"([a-zA-Z0-9]{3,40})"`),
-		mapIdentKeyHashRe:  regexp.MustCompile(`([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:\s*"([a-zA-Z0-9]{3,40})"`),
+		mapNumericHashRe:    regexp.MustCompile(`(\d+)\s*:\s*"([a-zA-Z0-9]{3,40})"`),
+		mapQuotedKeyHashRe:  regexp.MustCompile(`"([a-zA-Z_][a-zA-Z0-9_.~@\-/]+)"\s*:\s*"([a-zA-Z0-9]{3,40})"`),
+		mapIdentKeyHashRe:   regexp.MustCompile(`([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:\s*"([a-zA-Z0-9]{3,40})"`),
+		mapQuotedKeyValueRe: regexp.MustCompile("\"([a-zA-Z_][a-zA-Z0-9_.~@\\-/]+)\"\\s*:\\s*\"([^\"\\\\]{1,80})\""),
+		mapIdentKeyValueRe:  regexp.MustCompile("([a-zA-Z_$][a-zA-Z0-9_$]{1,60})\\s*:\\s*\"([^\"\\\\]{1,80})\""),
+		ternaryNameMapRe:    regexp.MustCompile(`\((\d+)===e\?"([^"]+)":e\)\+\s*"([^"]+)"\+\s*\{([^}]+)\}\s*\[\w+\]\+\s*"\.js"`),
 		// 通用字符串 key -> hex hash 映射（hex 值 5-20 位）
 		// 用于 webpackRequireUChunkPatternRe 回退：当 idValueRe 提取不到数字 key 时，
 		// 用此正则提取所有字符串 key 的 hash 映射（chunk-xxx、noprefetch-xxx、vendors~xxx 等）
@@ -211,6 +219,52 @@ func NewWebpackPlugin() *WebpackPlugin {
 
 func (p *WebpackPlugin) Name() string {
 	return "WebpackPlugin"
+}
+
+// extractChunkNameHashMaps 从运行时内容中提取 chunk 名/哈希映射。
+// 覆盖三种 key 形式：数字（153:"xxx"）、带引号字符串（"page2-extra":"xxx"）、
+// 无引号 identifier（src_views_extra_js:"xxx"）。值按是否纯 hex 分离为
+// nameMap / hashMap，供 name+hash 两种拼接格式共用。
+func (p *WebpackPlugin) extractChunkNameHashMaps(content string) (nameMap, hashMap map[string]string) {
+	nameMap = make(map[string]string)
+	hashMap = make(map[string]string)
+	isHex := func(s string) bool {
+		if s == "" {
+			return false
+		}
+		for _, c := range s {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+				return false
+			}
+		}
+		return true
+	}
+	put := func(id, val string) {
+		if isHex(val) {
+			hashMap[id] = val
+		} else {
+			nameMap[id] = val
+		}
+	}
+	// 数字 key
+	for _, m := range p.idValueRe.FindAllStringSubmatch(content, -1) {
+		if len(m) > 2 {
+			put(m[1], m[2])
+		}
+	}
+	// 带引号字符串 key
+	for _, m := range p.mapQuotedKeyValueRe.FindAllStringSubmatch(content, -1) {
+		if len(m) > 2 {
+			put(m[1], m[2])
+		}
+	}
+	// 无引号 identifier key
+	for _, m := range p.mapIdentKeyValueRe.FindAllStringSubmatch(content, -1) {
+		if len(m) > 2 {
+			put(m[1], m[2])
+		}
+	}
+	return nameMap, hashMap
 }
 
 func (p *WebpackPlugin) Precheck(ctx context.Context, input *extractor.AnalyzeInput) bool {
@@ -477,31 +531,8 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 	if match := p.webpackRequireUChunkPatternRe.FindStringSubmatch(content); len(match) > 1 {
 		prefix := match[1] // "static/js/async/"
 
-		// 提取所有 {id:"value"} 映射
-		allMappings := p.idValueRe.FindAllStringSubmatch(content, -1)
-
-		// 分离 name 和 hash 映射
-		nameMap := make(map[string]string)
-		hashMap := make(map[string]string)
-		isHex := func(s string) bool {
-			for _, c := range s {
-				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-					return false
-				}
-			}
-			return true
-		}
-		for _, m := range allMappings {
-			if len(m) > 2 {
-				id := m[1]
-				val := m[2]
-				if isHex(val) {
-					hashMap[id] = val
-				} else {
-					nameMap[id] = val
-				}
-			}
-		}
+		// 提取所有 {id:"value"} 映射（数字/字符串 key），分离 name 和 hash
+		nameMap, hashMap := p.extractChunkNameHashMaps(content)
 
 		// 如果有 publicPath 且是绝对 URL，直接拼接成绝对 URL
 		var publicPath string
@@ -601,31 +632,8 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 			prefix = "static/js/async/" // 默认前缀
 		}
 
-		// 提取所有 {id:"value"} 映射
-		allMappings := p.idValueRe.FindAllStringSubmatch(content, -1)
-
-		// 分离 name 和 hash 映射
-		nameMap := make(map[string]string)
-		hashMap := make(map[string]string)
-		isHex := func(s string) bool {
-			for _, c := range s {
-				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-					return false
-				}
-			}
-			return true
-		}
-		for _, m := range allMappings {
-			if len(m) > 2 {
-				id := m[1]
-				val := m[2]
-				if isHex(val) {
-					hashMap[id] = val
-				} else {
-					nameMap[id] = val
-				}
-			}
-		}
+		// 提取所有 {id:"value"} 映射（数字/字符串 key），分离 name 和 hash
+		nameMap, hashMap := p.extractChunkNameHashMaps(content)
 
 		// 生成 chunk URL: prefix + name + "." + hash + ".js"
 		for id, hash := range hashMap {
@@ -640,6 +648,30 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 				FromURL:  input.SourceURL,
 				IsInline: false,
 			})
+		}
+		return result, nil
+	}
+
+	// Gatsby/webpack 变体：(293===e?"component---xxx":e)+"-"+{id:"fullhash",...}[e]+".js"
+	// 无引号前缀 + 三元表达式特判 chunk 名，映射表为数字 key + 全量 hash
+	if match := p.ternaryNameMapRe.FindStringSubmatch(content); len(match) > 4 {
+		specialID, specialName := match[1], match[2]
+		separator := match[3]
+		mapStr := match[4]
+		for _, m := range p.mapNumericHashRe.FindAllStringSubmatch(mapStr, -1) {
+			if len(m) > 2 {
+				id, hash := m[1], m[2]
+				name := id
+				if id == specialID {
+					name = specialName
+				}
+				chunkPath := name + separator + hash + ".js"
+				result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
+					URL:      chunkPath,
+					FromURL:  input.SourceURL,
+					IsInline: false,
+				})
+			}
 		}
 		return result, nil
 	}

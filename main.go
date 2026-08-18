@@ -272,6 +272,8 @@ func main() {
 	registry.Register(plugins.NewMicroAppPlugin())
 	registry.Register(plugins.NewWujiePlugin())
 	registry.Register(plugins.NewIcestarkPlugin())
+	// Trunk（Rust wasm 打包器）sitemap.json 清单
+	registry.Register(plugins.NewTrunkPlugin())
 	// 通用 URL 兜底提取（编码还原后做宽匹配，捕获 document.write 等其他插件未覆盖的场景）
 	registry.Register(plugins.NewUniversalURLPlugin())
 
