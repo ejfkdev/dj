@@ -34,9 +34,11 @@ func parseFormat(s string) (extractor.OutputFormat, bool) {
 // printHelp 输出帮助信息
 func printHelp() {
 	fmt.Printf("dj - JS/SourceMap Extractor %s\n", version)
-	fmt.Printf("Extract JS URLs and source maps from websites\n\n")
+	fmt.Printf("Extract JS URLs and source maps from websites\n")
+	fmt.Printf("GitHub: https://github.com/ejfkdev/dj\n\n")
 	fmt.Printf("Usage: dj [options] <url>\n\n")
 	fmt.Printf("Options:\n")
+	fmt.Printf("  -v, --version            print version and exit\n")
 	fmt.Printf("  -d, --debug              enable debug output\n")
 	fmt.Printf("  -f, --format <fmt>       output format: text | json | md (default: text)\n")
 	fmt.Printf("      --no-cache           disable cache reads (still saves to disk)\n")
@@ -48,6 +50,7 @@ func printHelp() {
 	fmt.Printf("      --no-random-tls      disable randomized TLS fingerprint (use fixed Chrome)\n")
 	fmt.Printf("  -o, --output <dir>       output directory (saves a copy without site subdir)\n")
 	fmt.Printf("  -t, --timeout <secs>     per-request timeout in seconds (default: 30)\n")
+	fmt.Printf("  -c, --concurrency <N>    concurrent fetches (default: 8)\n")
 	fmt.Printf("  -h, --help               show this help\n\n")
 	fmt.Printf("Notes:\n")
 	fmt.Printf("  - URL is the first non-flag argument; flags can appear before or after it\n")
@@ -85,9 +88,10 @@ func main() {
 	var proxy string
 	var cookie string
 	var url string
-	var noRandomTLS bool     // --no-random-tls 关闭随机化 TLS 指纹
-	var rawHeaders []string  // 收集所有 -H/--header 值，最后一次性解析
-	var timeoutSecs int = 30 // -t/--timeout 单个 HTTP 请求超时秒数
+	var noRandomTLS bool         // --no-random-tls 关闭随机化 TLS 指纹
+	var rawHeaders []string      // 收集所有 -H/--header 值，最后一次性解析
+	var timeoutSecs int = 30     // -t/--timeout 单个 HTTP 请求超时秒数
+	var fetchConcurrency int = 8 // -c/--concurrency 并发下载数
 
 	// 取下一段参数值（支持 --flag value 和 --flag=value 两种形式）
 	nextValue := func(i *int) (string, bool) {
@@ -115,6 +119,9 @@ func main() {
 		name, val := splitEq(arg)
 
 		switch {
+		case name == "--version" || name == "-v":
+			fmt.Printf("dj %s\n", version)
+			os.Exit(0)
 		case name == "--debug" || name == "-d" || name == "-debug":
 			debug = true
 		case name == "--no-cache":
@@ -207,6 +214,21 @@ func main() {
 				os.Exit(1)
 			}
 			timeoutSecs = n
+		case name == "--concurrency" || name == "-c":
+			if val == "" {
+				if v, ok := nextValue(&i); ok {
+					val = v
+				} else {
+					fmt.Fprintln(os.Stderr, "missing value for --concurrency/-c")
+					os.Exit(1)
+				}
+			}
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 1 || n > 256 {
+				fmt.Fprintf(os.Stderr, "invalid --concurrency value: %q (expect 1-256)\n", val)
+				os.Exit(1)
+			}
+			fetchConcurrency = n
 		case name == "--header" || name == "-H":
 			if val == "" {
 				if v, ok := nextValue(&i); ok {
@@ -295,6 +317,7 @@ func main() {
 		fpMode = fetcher.TLSFingerprintChrome
 	}
 	pipeline.SetFetcherConfig(proxy, ua, fpMode, time.Duration(timeoutSecs)*time.Second)
+	pipeline.SetFetchConcurrency(fetchConcurrency)
 
 	// 注入 cookie（用于绕过 Cloudflare 等防护）
 	if cookie != "" {

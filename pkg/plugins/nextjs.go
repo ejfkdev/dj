@@ -13,12 +13,15 @@ import (
 type NextJSPlugin struct {
 	// Turbopack chunk 头依赖数组 otherChunks:[...]
 	otherChunksRe *regexp.Regexp
-	buildIdRe     *regexp.Regexp
-	assetPrefixRe *regexp.Regexp
-	nextDataRe    *regexp.Regexp
-	sTypeRe       *regexp.Regexp
-	numChunkIdRe  *regexp.Regexp
-	numHashMapRe  *regexp.Regexp
+	// _buildManifest 的 sortedPages 数组（供额外探测）
+	sortedPagesRe    *regexp.Regexp
+	sortedPageItemRe *regexp.Regexp
+	buildIdRe        *regexp.Regexp
+	assetPrefixRe    *regexp.Regexp
+	nextDataRe       *regexp.Regexp
+	sTypeRe          *regexp.Regexp
+	numChunkIdRe     *regexp.Regexp
+	numHashMapRe     *regexp.Regexp
 	// Flight/RSC 相关
 	flightChunkRe *regexp.Regexp // I[moduleId,["chunk1","chunk2"],...]
 	flightHLRe    *regexp.Regexp // :HL["path.js","script"]
@@ -34,7 +37,9 @@ type NextJSPlugin struct {
 // NewNextJSPlugin 创建插件
 func NewNextJSPlugin() *NextJSPlugin {
 	return &NextJSPlugin{
-		otherChunksRe: regexp.MustCompile(`otherChunks\s*:\s*\[([^\]]+)\]`),
+		otherChunksRe:    regexp.MustCompile(`otherChunks\s*:\s*\[([^\]]+)\]`),
+		sortedPagesRe:    regexp.MustCompile(`sortedPages\s*:\s*\[([^\]]+)\]`),
+		sortedPageItemRe: regexp.MustCompile(`"([^"]+)"`),
 		// buildId 提取: "buildId":"v0.16.3-community"
 		buildIdRe: regexp.MustCompile(`"buildId"\s*:\s*"([^"]+)"`),
 		// assetPrefix 提取: https://cdn.example.com/_next
@@ -515,6 +520,31 @@ func (p *NextJSPlugin) extractTurbopackOtherChunks(input *extractor.AnalyzeInput
 					URL:      origin + "/_next/" + rel,
 					FromURL:  input.SourceURL,
 					IsInline: false,
+				})
+			}
+		}
+	}
+
+	// 识别到 Next.js/_buildManifest（sortedPages 字段），对列出的页面发
+	// 额外的固定名探测请求：RSC 飞行数据 + 常规页面 HTML。静态导出站点
+	// 没有 provider 字面量引用，但 SSR 部署会由服务端注入 provider script，
+	// 探测可顺带把 provider 链牵出来（每个页面每条各 1 个固定名请求，
+	// 非目录枚举）。
+	baseURL := extractor.GetBaseURL(input.SourceURL)
+	if sorted := p.sortedPagesRe.FindStringSubmatch(content); len(sorted) > 1 {
+		for _, m := range p.sortedPageItemRe.FindAllStringSubmatch(sorted[1], -1) {
+			if len(m) < 2 {
+				continue
+			}
+			page := m[1]
+			if baseURL != "" {
+				result.RSCProbes = append(result.RSCProbes, extractor.RSCProbe{
+					URL:     baseURL + page,
+					Headers: map[string]string{"RSC": "1"},
+				})
+				result.Intermediates = append(result.Intermediates, extractor.Intermediate{
+					URL:  baseURL + page,
+					Type: extractor.ContentTypeHTML,
 				})
 			}
 		}
