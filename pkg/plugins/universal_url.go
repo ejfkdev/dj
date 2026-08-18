@@ -42,6 +42,10 @@ type UniversalURLPlugin struct {
 	// 10. 函数调用字面量参数: j("/remote/assets/x.js") 风格（vite federation
 	//    的远程模块加载器、其它自定义 loader 的调用点）
 	callArgRe *regexp.Regexp
+	// 10b. 配置/清单类引号路径字面量: "/cdn/font-icon/x.js"、
+	//     "assets/htmlMode-x.js"、"tinymce/langs/zh_CN.js" 等
+	//     （antd iconfont scriptUrl、monaco 资源清单、tinymce language_url）
+	pathLitRe *regexp.Regexp
 
 	// 11. 变量跟踪：var/const/let 字符串常量与 import(变量)/拼接引用
 	constAssignRe  *regexp.Regexp
@@ -72,6 +76,7 @@ func NewUniversalURLPlugin() *UniversalURLPlugin {
 		quotedRe:      regexp.MustCompile(`["']([^"']+\.js[^"']*)["']`),
 		// 函数调用带绝对路径 .js 参数
 		callArgRe: regexp.MustCompile(`\b\w+\s*\(\s*["\'](/[^"\']+\.js[^"\']*)["\']`),
+		pathLitRe: regexp.MustCompile(`["\']((?:/|[.]{1,2}/)?(?:[a-zA-Z0-9_-]+/)+(?:[a-zA-Z0-9_-]+)\.js)["\']`),
 		// 变量跟踪三件套：常量赋值、常量拼接、import(变量)
 		constAssignRe:  regexp.MustCompile(`(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*["']([^"']{1,200})["']`),
 		concatAssignRe: regexp.MustCompile(`([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*\+\s*["']([^"']{1,200})["']`),
@@ -185,6 +190,13 @@ func (p *UniversalURLPlugin) Analyze(ctx context.Context, input *extractor.Analy
 	}
 	// 7a. 函数调用字面量参数（j("/remote/assets/x.js") 等自定义 loader 调用点）
 	for _, m := range p.callArgRe.FindAllStringSubmatch(decoded, -1) {
+		if len(m) > 1 {
+			add(m[1])
+		}
+	}
+	// 7a2. 配置/清单类路径字面量（iconfont scriptUrl、monaco 清单、
+	//      tinymce language_url 等固定引号路径）
+	for _, m := range p.pathLitRe.FindAllStringSubmatch(decoded, -1) {
 		if len(m) > 1 {
 			add(m[1])
 		}

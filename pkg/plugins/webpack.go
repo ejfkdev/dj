@@ -99,6 +99,9 @@ type WebpackPlugin struct {
 	// 字符串键映射（值任意，供 name/hash 分离使用）
 	mapQuotedKeyValueRe *regexp.Regexp
 	mapIdentKeyValueRe  *regexp.Regexp
+	// 带引号的数字 key 映射（umi 等 "185":"58b15d06" / "185":"p__Welcome"）
+	fcNumHashRe *regexp.Regexp
+	fcNumNameRe *regexp.Regexp
 	// Gatsby 三元特判 + hash 映射（无引号前缀变体）
 	ternaryNameMapRe *regexp.Regexp
 	// webpack 5 极简 runtime 形状识别（用于 Precheck）
@@ -188,7 +191,7 @@ func NewWebpackPlugin() *WebpackPlugin {
 		chunkHashMapFingerprintRe: regexp.MustCompile(`"(chunk-[0-9a-f]{6,})"\s*:\s*"([a-f0-9]{6,20}\.\d{10,16})"`),
 		// ({name}[e]||e)+"."+{hash}[e]+".js" 格式
 		// 匹配: ({812:"name",...}[e]||e)+"."+{236:"hash",...}[e]+".js"
-		webpackFederationChunkPatternRe: regexp.MustCompile(`\(\s*\{[^}]+\}\[\w+\]\s*\|\|\s*\w+\s*\)\s*\+\s*"\."\s*\+\s*\{[^}]+\}\[\w+\]\s*\+\s*"\.js"`),
+		webpackFederationChunkPatternRe: regexp.MustCompile(`\(\s*\{([^}]+)\}\s*\[\w+\]\s*\|\|\s*\w+\s*\)\s*\+\s*"\."\s*\+\s*\{([^}]+)\}\s*\[\w+\]\s*\+\s*"((?:\.async)?\.js)"`),
 		// __webpack_require__.u 函数中的 chunk URL 映射模式
 		// 匹配: "prefix/"+({name}[e]||e)+"."+{hash}[e]+".js"
 		webpackRequireUChunkPatternRe: regexp.MustCompile(`"([^"]+/)"\s*\+\s*\(\s*\{[^}]+\}\[\w+\]\s*\|\|\s*\w+\s*\)\s*\+\s*"\."\s*\+\s*\{[^}]+\}\[\w+\]\s*\+\s*"\.js"`),
@@ -205,6 +208,8 @@ func NewWebpackPlugin() *WebpackPlugin {
 		mapIdentKeyHashRe:   regexp.MustCompile(`([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:\s*"([a-zA-Z0-9]{3,40})"`),
 		mapQuotedKeyValueRe: regexp.MustCompile("\"([a-zA-Z_][a-zA-Z0-9_.~@\\-/]+)\"\\s*:\\s*\"([^\"\\\\]{1,80})\""),
 		mapIdentKeyValueRe:  regexp.MustCompile("([a-zA-Z_$][a-zA-Z0-9_$]{1,60})\\s*:\\s*\"([^\"\\\\]{1,80})\""),
+		fcNumHashRe:         regexp.MustCompile(`"(\d+)"\s*:\s*"([a-zA-Z0-9]{3,40})"`),
+		fcNumNameRe:         regexp.MustCompile(`"(\d+)"\s*:\s*"([^"\\]{1,80})"`),
 		ternaryNameMapRe:    regexp.MustCompile(`\((\d+)===e\?"([^"]+)":e\)\+\s*"([^"]+)"\+\s*\{([^}]+)\}\s*\[\w+\]\+\s*"\.js"`),
 		// 通用字符串 key -> hex hash 映射（hex 值 5-20 位）
 		// 用于 webpackRequireUChunkPatternRe 回退：当 idValueRe 提取不到数字 key 时，
@@ -271,6 +276,7 @@ func (p *WebpackPlugin) Precheck(ctx context.Context, input *extractor.AnalyzeIn
 	if input.ContentType != extractor.ContentTypeJS {
 		return false
 	}
+
 	if bytesContainsAny(input.Content, [][]byte{
 		[]byte("__webpack_require__"),
 		[]byte("webpackJsonp"),
@@ -615,12 +621,13 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 	}
 
 	// ({name}[e]||e)+"."+{hash}[e]+".js" 格式（无前缀版本）
-	if match := p.webpackFederationChunkPatternRe.FindStringSubmatch(content); len(match) > 0 {
+	if match := p.webpackFederationChunkPatternRe.FindStringSubmatch(content); len(match) > 3 {
+		nameMapStr, hashMapStr, suffix := match[1], match[2], match[3]
+
 		// 提取前缀 - 查找匹配部分之前的 "prefix/" 模式
 		prefix := ""
 		idx := strings.Index(content, match[0])
 		if idx > 0 {
-			// 提取前缀：查找 "..."+ 模式
 			prefixRe := regexp.MustCompile(`"([^"]+/)"\s*\+\s*$`)
 			before := content[:idx]
 			prefixMatches := prefixRe.FindAllStringSubmatch(before, -1)
@@ -629,20 +636,38 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 			}
 		}
 		if prefix == "" {
-			prefix = "static/js/async/" // 默认前缀
+			if strings.HasSuffix(suffix, ".async.js") {
+				prefix = "" // umi 等 async chunk 在站点根目录
+			} else {
+				prefix = "static/js/async/" // 默认前缀
+			}
 		}
 
-		// 提取所有 {id:"value"} 映射（数字/字符串 key），分离 name 和 hash
-		nameMap, hashMap := p.extractChunkNameHashMaps(content)
-
-		// 生成 chunk URL: prefix + name + "." + hash + ".js"
-		for id, hash := range hashMap {
-			var chunkPath string
-			if name, ok := nameMap[id]; ok {
-				chunkPath = prefix + name + "." + hash + ".js"
-			} else {
-				chunkPath = prefix + id + "." + hash + ".js"
+		// 从两个映射表字符串中直接提取（map 作用域，比全内容安全）
+		nameMap := make(map[string]string)
+		hashMap := make(map[string]string)
+		for _, re := range []*regexp.Regexp{p.idValueRe, p.fcNumNameRe, p.mapQuotedKeyValueRe, p.mapIdentKeyValueRe} {
+			for _, m := range re.FindAllStringSubmatch(nameMapStr, -1) {
+				if len(m) > 2 {
+					nameMap[m[1]] = m[2]
+				}
 			}
+		}
+		for _, re := range []*regexp.Regexp{p.mapNumericHashRe, p.fcNumHashRe, p.mapQuotedKeyHashRe, p.mapIdentKeyHashRe} {
+			for _, m := range re.FindAllStringSubmatch(hashMapStr, -1) {
+				if len(m) > 2 {
+					hashMap[m[1]] = m[2]
+				}
+			}
+		}
+
+		// 生成 chunk URL: prefix + name(或 id) + "." + hash + suffix
+		for id, hash := range hashMap {
+			name := id
+			if n, ok := nameMap[id]; ok {
+				name = n
+			}
+			chunkPath := prefix + name + "." + hash + suffix
 			result.ProbeTargets = append(result.ProbeTargets, extractor.DiscoveredJS{
 				URL:      chunkPath,
 				FromURL:  input.SourceURL,

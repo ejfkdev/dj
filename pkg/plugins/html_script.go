@@ -26,13 +26,12 @@ type HTMLScriptPlugin struct {
 func NewHTMLScriptPlugin() *HTMLScriptPlugin {
 	return &HTMLScriptPlugin{
 		scriptRe: regexp.MustCompile(`<script[^>]*\bsrc=["']?([^"'>\s]+)["']?`),
-		// 匹配 <link rel="modulepreload" href="...">
-		modulePreloadRe: regexp.MustCompile(`<link[^>]+rel=["']modulepreload["'][^>]+href=["']([^"']+)["']`),
+		// 匹配 <link rel="modulepreload" href="...">（属性值可无引号）
+		modulePreloadRe: regexp.MustCompile(`<link[^>]+rel\s*=\s*["']?modulepreload["']?[^>]+href\s*=\s*["']?([^"'\s>]+\.js)["']?`),
 		// 匹配 <link rel="prefetch" href="..."> 或 <link href="..." rel="prefetch">
-		// 兼容属性顺序：href 可在 rel 之前或之后（生产 HTML 两种都常见）
+		// 兼容属性顺序与无引号属性值（jeecg 等压缩 HTML：<link href=/js/x.js rel=prefetch>）
 		// Vue 3 / Vite 生产构建会用此标签预取所有异步 chunk
-		// 注：独立于 modulePreloadRe，按用户要求不修改 modulepreload 提取逻辑
-		prefetchRe: regexp.MustCompile(`<link[^>]+(?:href=["']([^"']+\.js)["'][^>]*rel=["']prefetch["']|rel=["']prefetch["'][^>]+href=["']([^"']+\.js)["'])`),
+		prefetchRe: regexp.MustCompile(`<link[^>]+(?:href\s*=\s*["']?([^"'\s>]+\.js)["']?[^>]*rel\s*=\s*["']?prefetch["']?|rel\s*=\s*["']?prefetch["']?[^>]+href\s*=\s*["']?([^"'\s>]+\.js)["']?)`),
 		// 匹配 <script type="module" src="...">
 		entryScriptRe: regexp.MustCompile(`<script[^>]+type=["']module["'][^>]*src=["']([^"']+)["']`),
 	}
