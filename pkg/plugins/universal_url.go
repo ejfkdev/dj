@@ -34,6 +34,11 @@ type UniversalURLPlugin struct {
 	bareJSRe *regexp.Regexp
 	// 7. 协议相对 URL 模式
 	protocolRelativeRe *regexp.Regexp
+	// 8. System.register(['./a.js','./b.js'],...) systemjs 依赖数组
+	//    （single-spa/rollup system 产物）
+	sysRegisterRe *regexp.Regexp
+	// 9. 数组中引号字符串片段
+	quotedRe *regexp.Regexp
 }
 
 // NewUniversalURLPlugin 创建插件
@@ -54,6 +59,9 @@ func NewUniversalURLPlugin() *UniversalURLPlugin {
 		bareJSRe: regexp.MustCompile(`["']([^"'\\\s]*?\.js(?:\?[^"'\\]*?)?)["']`),
 		// 协议相对 URL
 		protocolRelativeRe: regexp.MustCompile(`["'](//[a-zA-Z0-9.\-]+/[^"']+\.js[^"']*)["']`),
+		// System.register(['./dynamic/dep/shared-xxx.js', ...], ...)
+		sysRegisterRe: regexp.MustCompile(`System\.register\s*\(\s*\[([^\]]+)\]`),
+		quotedRe:      regexp.MustCompile(`["']([^"']+\.js[^"']*)["']`),
 	}
 }
 
@@ -150,7 +158,18 @@ func (p *UniversalURLPlugin) Analyze(ctx context.Context, input *extractor.Analy
 			add(m[1][idx+1:])
 		}
 	}
-	// 7. 兜底: 宽松匹配所有 .js 字符串（仅在前面规则未命中的情况下使用）
+	// 7. System.register(['./a.js', ...], ...) systemjs 依赖数组
+	//    （rollup system 格式 / single-spa）。不依赖 seen==0 门控——
+	//    这些是真实模块依赖，不是兜底宽匹配，误报率可接受。
+	//    注意：System.import('...') 已由 2. importRe 覆盖。
+	for _, m := range p.sysRegisterRe.FindAllStringSubmatch(decoded, -1) {
+		for _, q := range p.quotedRe.FindAllStringSubmatch(m[1], -1) {
+			if len(q) > 1 {
+				add(q[1])
+			}
+		}
+	}
+	// 8. 兜底: 宽松匹配所有 .js 字符串（仅在前面规则未命中的情况下使用）
 	//    限制：URL 长度 < 500 字符，避免误匹配 CSS/注释中的长字符串
 	if len(seen) == 0 {
 		for _, m := range p.bareJSRe.FindAllStringSubmatch(decoded, -1) {
