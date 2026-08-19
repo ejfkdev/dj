@@ -281,22 +281,22 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 | 站点 | JS | 站点 | JS |
 |------|----|------|----|
 | [chat.deepseek.com](https://chat.deepseek.com) | 41 | [chat.z.ai](https://chat.z.ai) | 168 |
-| [kimi.moonshot.cn](https://kimi.moonshot.cn) | 484 | [cloud.tencent.com](https://cloud.tencent.com) | ⏱ |
-| [docs.qq.com](https://docs.qq.com) | 9 | [www.aliyun.com](https://www.aliyun.com) | ⏱ |
+| [kimi.moonshot.cn](https://kimi.moonshot.cn) | 484 | [cloud.tencent.com](https://cloud.tencent.com) | 107 |
+| [docs.qq.com](https://docs.qq.com) | 9 | [www.aliyun.com](https://www.aliyun.com) | 270 |
 
 **企业 / 协作**
 
 | 站点 | JS | 站点 | JS |
 |------|----|------|----|
-| [feishu.cn](https://www.feishu.cn) | ⏱ | [dingtalk.com](https://www.dingtalk.com) | 44 |
-| [youzan.com](https://www.youzan.com) | ⏱ | [kingdee.com](https://www.kingdee.com) | ⏱ |
+| [feishu.cn](https://www.feishu.cn) | 69 | [dingtalk.com](https://www.dingtalk.com) | 44 |
+| [youzan.com](https://www.youzan.com) | ⏱ | [kingdee.com](https://www.kingdee.com) | 167 |
 | [chanjet.com](https://www.chanjet.com) | 27 | [landray.com.cn](https://www.landray.com.cn) | 46 |
 
 **电商 / 门户**
 
 | 站点 | JS | 站点 | JS |
 |------|----|------|----|
-| [gitee.com](https://gitee.com) | ⏱ | [baidu.com](https://www.baidu.com) | 506 |
+| [gitee.com](https://gitee.com) | 260 | [baidu.com](https://www.baidu.com) | 506 |
 | [meituan.com](https://www.meituan.com) | 177 | [pinduoduo.com](https://www.pinduoduo.com) | 11 |
 | [bilibili.com](https://www.bilibili.com) | 369 | [juejin.cn](https://www.juejin.cn) | 102 |
 
