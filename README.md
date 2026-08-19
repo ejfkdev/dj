@@ -218,7 +218,7 @@ dj -f md https://example.com
 | `--no-random-tls` | Disable randomized TLS fingerprint (use fixed Chrome) |
 | `-o, --output <dir>` | Output directory (saves a copy of all files: js/, html/, source_map/, sources/) without site subdir |
 | `-t, --timeout <secs>` | Per-request timeout in seconds (default: 30) |
-| `-c, --concurrency <N>` | Concurrent fetches (default: 8) |
+| `-c, --concurrency <N>` | Max concurrent HTTP requests — downloads, probes, HEAD/RSC share this budget (default: 8) |
 | `-h, --help` | Show help information |
 
 ### Examples

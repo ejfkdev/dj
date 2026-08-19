@@ -48,6 +48,35 @@ type FetcherConfig struct {
 	RequestTimeout time.Duration      // 单个 HTTP 请求超时（默认 10s）
 }
 
+// defaultFetcherConcurrency Fetcher 默认全局 HTTP 并发上限
+const defaultFetcherConcurrency = 8
+
+// SetConcurrency 设置全局 HTTP 并发上限（所有请求共享）。
+// n<1 时取 1，n>256 时取 256。
+func (f *Fetcher) SetConcurrency(n int) {
+	if n < 1 {
+		n = 1
+	}
+	if n > 256 {
+		n = 256
+	}
+	f.sem = make(chan struct{}, n)
+}
+
+// acquire 获取一个并发槽位；调用方必须 defer release()
+func (f *Fetcher) acquire() {
+	if f.sem != nil {
+		f.sem <- struct{}{}
+	}
+}
+
+// release 归还并发槽位
+func (f *Fetcher) release() {
+	if f.sem != nil {
+		<-f.sem
+	}
+}
+
 // FetchResult 包含内容和状态码
 type FetchResult struct {
 	Content     []byte
@@ -64,6 +93,8 @@ type Fetcher struct {
 	cookieJar      http.CookieJar
 	browserHeaders bool
 	extraHeaders   map[string]string // 用户通过 --header 指定的自定义请求头
+	// sem 全局 HTTP 并发信号量：所有请求（下载/探测/HEAD/RSC）共享同一预算
+	sem chan struct{}
 }
 
 // NewFetcher 创建下载器（使用默认配置）
@@ -116,7 +147,7 @@ func NewFetcherWithConfig(cfg FetcherConfig) (*Fetcher, error) {
 		reqTimeout = cfg.RequestTimeout
 	}
 
-	return &Fetcher{
+	f := &Fetcher{
 		client: &http.Client{
 			Transport: transport,
 			Timeout:   reqTimeout,
@@ -132,7 +163,9 @@ func NewFetcherWithConfig(cfg FetcherConfig) (*Fetcher, error) {
 		cookieJar:      jar,
 		browserHeaders: cfg.UseUTLS,
 		extraHeaders:   make(map[string]string),
-	}, nil
+	}
+	f.SetConcurrency(8) // 默认全局并发上限
+	return f, nil
 }
 
 // parseProxyURL 解析代理 URL，自动补全 http:// scheme
@@ -281,6 +314,9 @@ func (lr *limitedReader) Read(p []byte) (int, error) {
 
 // Fetch 获取 URL 内容
 func (f *Fetcher) Fetch(rawURL string) ([]byte, error) {
+	// 全局 HTTP 并发预算：与探测/HEAD/RSC 等其他请求共享同一上限
+	f.acquire()
+	defer f.release()
 	req, err := f.newRequest(rawURL)
 	if err != nil {
 		return nil, err
@@ -314,6 +350,9 @@ func (f *Fetcher) Fetch(rawURL string) ([]byte, error) {
 
 // FetchWithStatus 获取 URL 内容和状态码
 func (f *Fetcher) FetchWithStatus(rawURL string) (*FetchResult, error) {
+	// 全局 HTTP 并发预算：与探测/HEAD/RSC 等其他请求共享同一上限
+	f.acquire()
+	defer f.release()
 	req, err := f.newRequest(rawURL)
 	if err != nil {
 		return nil, err
@@ -359,6 +398,9 @@ func (f *Fetcher) FetchWithStatus(rawURL string) (*FetchResult, error) {
 
 // FetchWithHeaders 使用自定义请求头获取 URL 内容
 func (f *Fetcher) FetchWithHeaders(rawURL string, headers map[string]string) (*FetchResult, error) {
+	// 全局 HTTP 并发预算：与探测/HEAD/RSC 等其他请求共享同一上限
+	f.acquire()
+	defer f.release()
 	req, err := f.newRequest(rawURL)
 	if err != nil {
 		return nil, err
@@ -396,6 +438,9 @@ func (f *Fetcher) FetchWithHeaders(rawURL string, headers map[string]string) (*F
 
 // FetchWithStatusHead 使用 HEAD 请求探测 URL 是否存在
 func (f *Fetcher) FetchWithStatusHead(rawURL string) (*FetchResult, error) {
+	// 全局 HTTP 并发预算：与探测/HEAD/RSC 等其他请求共享同一上限
+	f.acquire()
+	defer f.release()
 	resp, err := f.client.Head(rawURL)
 	if err != nil {
 		return nil, err

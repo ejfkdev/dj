@@ -218,7 +218,7 @@ dj -f md https://example.com
 | `--no-random-tls` | 关闭随机化 TLS 指纹（使用固定 Chrome 指纹） |
 | `-o, --output <dir>` | 输出目录（将所有文件保存一份到此目录：js/、html/、source_map/、sources/，不含站点子目录） |
 | `-t, --timeout <secs>` | 单个 HTTP 请求超时秒数（默认 30） |
-| `-c, --concurrency <N>` | 并发下载数（默认 8） |
+| `-c, --concurrency <N>` | 全局 HTTP 并发上限——下载、探测、HEAD/RSC 共享同一预算（默认 8） |
 | `-h, --help` | 显示帮助信息 |
 
 ### 示例

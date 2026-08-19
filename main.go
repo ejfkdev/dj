@@ -50,7 +50,7 @@ func printHelp() {
 	fmt.Printf("      --no-random-tls      disable randomized TLS fingerprint (use fixed Chrome)\n")
 	fmt.Printf("  -o, --output <dir>       output directory (saves a copy without site subdir)\n")
 	fmt.Printf("  -t, --timeout <secs>     per-request timeout in seconds (default: 30)\n")
-	fmt.Printf("  -c, --concurrency <N>    concurrent fetches (default: 8)\n")
+	fmt.Printf("  -c, --concurrency <N>    max concurrent HTTP requests (default: 8)\n")
 	fmt.Printf("  -h, --help               show this help\n\n")
 	fmt.Printf("Notes:\n")
 	fmt.Printf("  - URL is the first non-flag argument; flags can appear before or after it\n")

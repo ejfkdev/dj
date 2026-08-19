@@ -159,6 +159,9 @@ func (p *Pipeline) SetFetchConcurrency(n int) {
 		n = 256
 	}
 	p.fetchConcurrency = n
+	if p.fetcher != nil {
+		p.fetcher.SetConcurrency(n)
+	}
 }
 
 // SetCacheConfig 设置缓存配置
@@ -315,18 +318,12 @@ func (p *Pipeline) Run(ctx context.Context, startURL string) ([]string, error) {
 		}
 
 		// 为每个 URL 启动一个 goroutine 处理完整流程（fetch + 验证 + 插件分发）。
-		// 用信号量限制并发数（默认 8，CLI --concurrency 可调）：避免连接
-		// 同时握手把小 backlog 的静态服务器打满（connect timed out → URL 静默丢失）。
-		if p.fetchConcurrency <= 0 {
-			p.fetchConcurrency = 8
-		}
-		sem := make(chan struct{}, p.fetchConcurrency)
+		// 并发预算由 Fetcher 内部全局信号量统一管控（下载/探测/HEAD/RSC 共享，
+		// -c/--concurrency 配置），此处直接派发任务，不再二次限流。
 		for _, urlStr := range tasks {
 			p.jsWg.Add(1)
 			go func(url string) {
 				defer p.jsWg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
 				p.processJSContentURL(ctx, url)
 			}(urlStr)
 		}
