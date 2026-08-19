@@ -177,7 +177,7 @@ dj -f md https://example.com
 | Option | Description |
 |--------|-------------|
 | `--debug` | Enable debug output |
-| `-f <format>` | Output format: `text` (default), `json`, `md` |
+| `-f <format>` | Output format: `md` (default), `json`, `text` (bare URL list) |
 | `--no-cache` | Disable cache reads (still saves downloaded files to disk) |
 | `--useragent=<UA>` | Custom User-Agent string |
 | `--ua=<UA>` | Short alias for `--useragent` |
@@ -339,7 +339,7 @@ When caching is enabled (default), the second run on the same site skips network
 via `source_url` / `from_plugin`.
 
 
-### Text (default)
+### Markdown (default)
 
 ```
 https://example.com/js/main.js

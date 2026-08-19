@@ -110,8 +110,9 @@ func (p *ModuleFederationPlugin) Analyze(ctx context.Context, input *extractor.A
 						}
 						htmlURL := parsed.Scheme + "://" + parsed.Host + "/" + strings.Join(d, "/") + "/index.html"
 						result.Intermediates = append(result.Intermediates, extractor.Intermediate{
-							URL:  htmlURL,
-							Type: extractor.ContentTypeHTML,
+							URL:     htmlURL,
+							Type:    extractor.ContentTypeHTML,
+							FromURL: input.SourceURL,
 						})
 					}
 				}

@@ -87,8 +87,9 @@ func (p *TrunkPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInput
 		return result, nil
 	}
 	result.Intermediates = append(result.Intermediates, extractor.Intermediate{
-		URL:  absoluteURL,
-		Type: extractor.ContentTypeJSON,
+		URL:     absoluteURL,
+		Type:    extractor.ContentTypeJSON,
+		FromURL: input.SourceURL,
 	})
 	return result, nil
 }

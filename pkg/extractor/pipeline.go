@@ -77,6 +77,10 @@ type Pipeline struct {
 	// HTML 中间入口的全局预算计数（防多页/iframe 递归爆炸）
 	htmlPivotCount int64
 
+	// 发现的独立 HTML 入口（多页/iframe 提取到的新页面）
+	htmlEntriesMu sync.Mutex
+	htmlEntries   []HTMLDetail
+
 	// EMP 联邦清单兜底探测只触发一次
 	empFallbackFired bool
 
@@ -135,6 +139,13 @@ func (p *Pipeline) enqueueIntermediate(intermediate Intermediate, fromPlugin str
 			return
 		}
 		atomic.AddInt64(&p.htmlPivotCount, 1)
+		p.htmlEntriesMu.Lock()
+		p.htmlEntries = append(p.htmlEntries, HTMLDetail{
+			URL:        normalizedURL,
+			FromURL:    intermediate.FromURL,
+			FromPlugin: fromPlugin,
+		})
+		p.htmlEntriesMu.Unlock()
 	}
 	p.tryEnqueue(normalizedURL, &DiscoveredJS{URL: normalizedURL, FromPlugin: fromPlugin})
 }
@@ -2182,6 +2193,10 @@ func (p *Pipeline) GetOutputResult() *OutputResult {
 	}
 	p.jsURLsMu.Unlock()
 	result.JSDetails = jsDetails
+
+	p.htmlEntriesMu.Lock()
+	result.HTMLEntries = append(result.HTMLEntries, p.htmlEntries...)
+	p.htmlEntriesMu.Unlock()
 
 	// 设置缓存目录（save-only 模式下也输出，因为文件已写入磁盘）
 	if p.cacheConfig != nil && p.cacheConfig.CanWrite() && p.baseURL != "" {

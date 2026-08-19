@@ -177,7 +177,7 @@ dj -f md https://example.com
 | 选项 | 说明 |
 |------|------|
 | `--debug` | 启用调试输出 |
-| `-f <format>` | 输出格式：`text`（默认）、`json`、`md` |
+| `-f <format>` | 输出格式：`md`（默认）、`json`、`text`（纯一行一个 URL 列表） |
 | `--no-cache` | 禁用缓存读取（下载的文件仍会保存到磁盘） |
 | `--useragent=<UA>` | 自定义 User-Agent |
 | `--ua=<UA>` | `--useragent` 的短别名 |

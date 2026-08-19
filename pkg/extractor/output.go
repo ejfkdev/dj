@@ -23,15 +23,23 @@ type JSDetail struct {
 	IsInline   bool   `json:"is_inline,omitempty"`
 }
 
+// HTMLDetail 发现的独立 HTML 入口（多页/iframe 提取到的新页面）
+type HTMLDetail struct {
+	URL        string `json:"url"`
+	FromURL    string `json:"from_url,omitempty"`
+	FromPlugin string `json:"from_plugin,omitempty"`
+}
+
 // OutputResult 输出结果结构
 type OutputResult struct {
-	Summary    Summary    `json:"summary"`
-	JSURLs     []string   `json:"jsURLs"`
-	JSDetails  []JSDetail `json:"jsDetails,omitempty"`
-	CacheBase  string     `json:"cacheBase,omitempty"`
-	CacheDirs  *CacheDirs `json:"cacheDirs,omitempty"`
-	OutputDir  string     `json:"outputDir,omitempty"`
-	OutputDirs *CacheDirs `json:"outputDirs,omitempty"`
+	Summary     Summary      `json:"summary"`
+	JSURLs      []string     `json:"jsURLs"`
+	JSDetails   []JSDetail   `json:"jsDetails,omitempty"`
+	HTMLEntries []HTMLDetail `json:"htmlEntries,omitempty"`
+	CacheBase   string       `json:"cacheBase,omitempty"`
+	CacheDirs   *CacheDirs   `json:"cacheDirs,omitempty"`
+	OutputDir   string       `json:"outputDir,omitempty"`
+	OutputDirs  *CacheDirs   `json:"outputDirs,omitempty"`
 }
 
 // Summary 统计摘要
@@ -160,6 +168,18 @@ func formatMD(result *OutputResult) string {
 		}
 		if result.OutputDirs.Source != "" {
 			sb.WriteString(fmt.Sprintf("- **sources**: %s\n", result.OutputDirs.Source))
+		}
+	}
+
+	// 独立 HTML 入口（多页/iframe 发现的新页面）
+	if len(result.HTMLEntries) > 0 {
+		sb.WriteString("\n## HTML Entries\n")
+		for _, h := range result.HTMLEntries {
+			from := h.FromURL
+			if from == "" {
+				from = "—"
+			}
+			sb.WriteString(fmt.Sprintf("- %s  *(discovered by=%s, from=%s)*\n", h.URL, h.FromPlugin, from))
 		}
 	}
 

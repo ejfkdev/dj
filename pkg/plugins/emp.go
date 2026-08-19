@@ -101,8 +101,9 @@ func (p *EmpPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInput) 
 	if base != "" {
 		for _, name := range []string{"emp.json", "emp-stats.json"} {
 			result.Intermediates = append(result.Intermediates, extractor.Intermediate{
-				URL:  base + "/" + name,
-				Type: extractor.ContentTypeJSON,
+				URL:     base + "/" + name,
+				Type:    extractor.ContentTypeJSON,
+				FromURL: input.SourceURL,
 			})
 		}
 	}

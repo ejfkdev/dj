@@ -91,8 +91,9 @@ func (p *HTMLPivotPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeI
 		}
 		seen[absoluteURL] = true
 		result.Intermediates = append(result.Intermediates, extractor.Intermediate{
-			URL:  absoluteURL,
-			Type: extractor.ContentTypeHTML,
+			URL:     absoluteURL,
+			Type:    extractor.ContentTypeHTML,
+			FromURL: input.SourceURL,
 		})
 	}
 

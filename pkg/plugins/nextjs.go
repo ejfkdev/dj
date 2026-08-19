@@ -543,8 +543,9 @@ func (p *NextJSPlugin) extractTurbopackOtherChunks(input *extractor.AnalyzeInput
 					Headers: map[string]string{"RSC": "1"},
 				})
 				result.Intermediates = append(result.Intermediates, extractor.Intermediate{
-					URL:  baseURL + page,
-					Type: extractor.ContentTypeHTML,
+					URL:     baseURL + page,
+					Type:    extractor.ContentTypeHTML,
+					FromURL: input.SourceURL,
 				})
 			}
 		}

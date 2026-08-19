@@ -27,6 +27,8 @@ type AnalyzeInput struct {
 type Intermediate struct {
 	URL  string      // 资源的绝对 URL
 	Type ContentType // 期望的资源类型
+	// FromURL 发现该中间资源的来源 URL（供 provenance 输出；可空）
+	FromURL string
 }
 
 // InlineScript 行内脚本内容

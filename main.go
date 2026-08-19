@@ -40,7 +40,7 @@ func printHelp() {
 	fmt.Printf("Options:\n")
 	fmt.Printf("  -v, --version            print version and exit\n")
 	fmt.Printf("  -d, --debug              enable debug output\n")
-	fmt.Printf("  -f, --format <fmt>       output format: text | json | md (default: text)\n")
+	fmt.Printf("  -f, --format <fmt>       output format: md (default) | json | text (bare URL list)\n")
 	fmt.Printf("      --no-cache           disable cache reads (still saves to disk)\n")
 	fmt.Printf("      --useragent <UA>     custom User-Agent string (non-ASCII supported)\n")
 	fmt.Printf("      --ua <UA>            short alias for --useragent\n")
@@ -70,7 +70,7 @@ func printHelp() {
 	fmt.Printf("  dj -o ./output https://example.com\n")
 	fmt.Printf("  dj -t 60 https://example.com\n")
 	fmt.Printf("  dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com\n")
-	fmt.Printf("  dj https://example.com -f md --debug\n\n")
+	fmt.Printf("  dj https://example.com -f text\n")
 	if outputDir != "" {
 		fmt.Printf("Cache path: %s\nOutput path: %s\n", fetcher.GetTempDir(), outputDir)
 	} else {
@@ -83,7 +83,7 @@ func main() {
 	var debug bool
 	var enableCache = true // 默认开启缓存
 	var showHelp bool
-	var outputFormat = extractor.FormatText
+	var outputFormat = extractor.FormatMD // 默认 markdown
 	var userAgent string
 	var proxy string
 	var cookie string
@@ -374,10 +374,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Pipeline error: %v\n", err)
 			os.Exit(1)
 		}
-
-		// 末尾追加汇总信息（JS 数、source map、源码还原、缓存目录）
-		result := pipeline.GetOutputResult()
-		fmt.Print(extractor.FormatTextSummary(result))
+		// text 模式：纯流式一行一个 URL，不再追加汇总（汇总去 -f md）
 	} else {
 		// json/md 模式：收集所有 URL 后统一输出
 		_, err := pipeline.Run(ctx, url)
