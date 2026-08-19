@@ -27,6 +27,106 @@
 - Custom User-Agent and browser-like request headers
 - Multiple output formats: text, JSON, markdown
 
+## Supported Frameworks & Loading Models
+
+dj's extractor is verified against real build output across **73 frameworks / loading models** and **562 versions**.
+
+### Bundlers (14)
+| Framework | Notes | Verified versions |
+|-----------|-------|-------------------|
+| **webpack** | webpack 5 runtime chunk maps | v5.0.0 ~ v5.109.2（18 个版本） |
+| **webpack4** | webpack 4 JSONP runtime | v4.33.0 ~ v4.47.0（15 个版本） |
+| **vite** | dynamic import / modulepreload / prefetch | v3.0.9 ~ v8.2.1（13 个版本） |
+| **rollup** | multi-entry + dynamic import | v2.0.6 ~ v4.62.4（18 个版本） |
+| **esbuild** | esbuild output | v0.14.54 ~ v0.28.2（15 个版本） |
+| **parcel** | parcel output | v2.0.1 ~ v2.16.4（4 个版本） |
+| **rsbuild** | rsbuild / rspack ecosystem | v1.0.19 ~ v1.7.6（7 个版本） |
+| **rspack** | runtime hash maps | v1.0.14 ~ v2.1.10（10 个版本） |
+| **farm** | Rust bundler | v0.1.1 ~ v1.0.5（5 个版本） |
+| **mako** | ByteDance mako | v0.4.17 ~ v0.11.15（8 个版本） |
+| **rolldown** | rolldown | v0.9.2 ~ v1.2.4（10 个版本） |
+| **systemjs** | SystemJS output | v0.21.6 ~ v6.15.1（17 个版本） |
+| **snowpack** | unbundled ESM output | v2.18.5 ~ v3.8.8（10 个版本） |
+| **turbopack** | Next.js turbopack | v15.3.9 ~ v16.3.1（7 个版本） |
+
+### Microfrontend frameworks (17)
+| Framework | Notes | Verified versions |
+|-----------|-------|-------------------|
+| **qiankun** | qiankun 2.x (incl. vite-plugin-qiankun) | v2.1.1 ~ v2.10.16（10 个版本） |
+| **single-spa** | root config | v4.4.4 ~ v6.0.3（12 个版本） |
+| **micro-app** | micro-app | v0.1.0 ~ v0.8.11（8 个版本） |
+| **wujie** | wujie | v1.0.29 ~ v2.1.0（3 个版本） |
+| **garfish** | garfish | v1.0.26 ~ v1.19.12（10 个版本） |
+| **icestark** | icestark | v1.0.0 ~ v2.8.4（11 个版本） |
+| **piral** | piral | v1.1.0 ~ v1.12.2（12 个版本） |
+| **luigi** | luigi | v0.0.9 ~ v1.7.11（10 个版本） |
+| **emp** | @efox/emp | v1.0.34 ~ v1.10.2（11 个版本） |
+| **hel-micro** | hel-micro | v3.5.16 ~ v4.15.3（10 个版本） |
+| **native-federation** | native federation | v0.9.1 ~ v4.4.1（11 个版本） |
+| **module-federation** | @module-federation/enhanced | v0.0.17 ~ v2.8.2（11 个版本） |
+| **mf-runtime** | MF runtime only | v2.1.0 ~ v2.8.2（8 个版本） |
+| **mf-vite** | MF vite integration | v1.13.7 ~ v1.20.7（8 个版本） |
+| **mf-rsbuild** | MF rsbuild plugin | v2.1.0 ~ v2.8.2（8 个版本） |
+| **webpack-mf** | webpack built-in MF | v5.98.0 ~ v5.108.4（10 个版本） |
+| **vite-plugin-federation** | Origin.js federation | v0.0.3 ~ v1.4.1（6 个版本） |
+
+### Meta frameworks / SSR (25)
+| Framework | Notes | Verified versions |
+|-----------|-------|-------------------|
+| **nuxt** | Nuxt | v3.0.0 ~ v4.5.2（8 个版本） |
+| **sveltekit** | SvelteKit | v2.0.8 ~ v2.70.2（10 个版本） |
+| **angular** | Angular | v17.0.10 ~ v20.3.34（10 个版本） |
+| **astro** | Astro | v3.6.5 ~ v7.2.2（4 个版本） |
+| **qwik** | Qwik | v1.9.1 ~ v1.20.0（12 个版本） |
+| **solidstart** | SolidStart | v1.1.7 ~ v2.0.0（4 个版本） |
+| **tanstack-start** | TanStack Start | v1.111.15 ~ v1.168.46（8 个版本） |
+| **marko** | Marko | v0.1.16 ~ v0.11.9（5 个版本） |
+| **react-router** | React Router framework mode | v7.0.2 ~ v8.3.0（8 个版本） |
+| **remix2** | Remix | v2.10.3 ~ v2.17.5（8 个版本） |
+| **redwood** | Redwood | v6.6.4 ~ v8.9.0（3 个版本） |
+| **analog** | Analog | v0.2.45 ~ v2.7.0（4 个版本） |
+| **vike** | Vike | v0.4.249 ~ v0.4.260（12 个版本） |
+| **hono** | Hono JSX | v4.2.9 ~ v4.13.2（12 个版本） |
+| **one** | One | v1.17.11 ~ v1.24.5（8 个版本） |
+| **fresh** | Deno Fresh | v1.4.3 ~ v2.3.3（7 个版本） |
+| **stencil** | Stencil | v4.33.1 ~ v4.44.0（12 个版本） |
+| **storybook** | Storybook static export | v9.0.18 ~ v10.5.9（8 个版本） |
+| **gatsby** | Gatsby | v4.25.9 ~ v5.16.1（5 个版本） |
+| **cra** | Create React App | v5.0.0 ~ v5.0.1（2 个版本） |
+| **umi** | UmiJS 4 | v4.0.90 ~ v4.7.6（8 个版本） |
+| **icejs** | ICE.js | v3.0.6 ~ v3.6.5（7 个版本） |
+| **vue-cli** | Vue CLI | v4.0.5 ~ v5.0.9（7 个版本） |
+| **modernjs** | Modern.js | v2.0.2 ~ v3.8.2（11 个版本） |
+| **bun** | Bun bundler | v0.6.14 ~ v1.3.14（7 个版本） |
+
+### Rust / WASM frontends (3)
+| Framework | Notes | Verified versions |
+|-----------|-------|-------------------|
+| **leptos** | Leptos | v0.4.10 ~ v0.8.20（5 个版本） |
+| **lustre** | Gleam Lustre | v5.4.0 ~ v5.7.1（4 个版本） |
+| **trunk** | Trunk (wasm-bindgen) | v0.17.5 ~ v0.21.14（5 个版本） |
+
+### Admin templates (12)
+| Framework | Notes | Verified versions |
+|-----------|-------|-------------------|
+| **ant-design-pro** | Ant Design Pro | v4.4.0 ~ v6.0.3（5 个版本） |
+| **amis** | Baidu amis | v1.9.0 ~ v6.13.0（4 个版本） |
+| **ng-alain** | NG-Alain | v17.3.1 ~ v21.3.0（5 个版本） |
+| **jeecg** | JeecgBoot | v3.3.0 ~ v3.4.3（2 个版本） |
+| **d2admin** | D2Admin | v1.25.0 |
+| **pig-ui** | Pig UI | v4.1.0 |
+| **tdesign-starter** | TDesign Starter | v0.11.0 ~ v0.14.0（2 个版本） |
+| **vue-element-admin** | vue-element-admin | v4.3.1 ~ v4.4.0（2 个版本） |
+| **vue-pure-admin** | vue-pure-admin | v6.3.0 ~ v7.0.0（2 个版本） |
+| **vue-vben-admin** | Vue Vben Admin | v5.3.2 ~ v5.4.8（2 个版本） |
+| **ruoyi-vue2** | RuoYi-Vue2 | v3.8.9 ~ v3.9.2（3 个版本） |
+| **ruoyi-vue3** | RuoYi-Vue3 | v3.9.1 ~ v3.9.2（2 个版本） |
+
+### Spec / polyfills (1)
+| Framework | Notes | Verified versions |
+|-----------|-------|-------------------|
+| **es-module-shims** | importmap bare specifiers | v2.1.2 ~ v2.8.4（8 个版本） |
+
 ## Installation
 
 ### Homebrew (macOS)
