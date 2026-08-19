@@ -265,48 +265,50 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 
 <details>
 <summary>📊 Tested websites (click to expand)</summary>
+> Snapshot: dj v0.5.21, 2026-08-19. ⏱ = timed out (still retesting).
+
 
 **Framework / Admin**
 
 | Site | JS | Site | JS |
 |-----|----|-----|----|
-| [vue.ruoyi.vip](https://vue.ruoyi.vip) | 70 | [demo.1panel.cn](https://demo.1panel.cn) | 524 |
-| [show.cool-admin.com/login](https://show.cool-admin.com/login) | 135 | [ant.design](https://ant.design) | 2536 |
-| [arco.design](https://arco.design) | 461 | [vuejs.org](https://vuejs.org) | 17 |
-| [react.dev](https://react.dev) | 34 | [svelte.dev](https://svelte.dev) | 74 |
-| [angular.io](https://angular.io) | 289 | [nuxt.com.cn](https://nuxt.com.cn) | 163 |
+| [vue.ruoyi.vip](https://vue.ruoyi.vip) | 74 | [demo.1panel.cn](https://demo.1panel.cn) | 590 |
+| [show.cool-admin.com/login](https://show.cool-admin.com/login) | 135 | [ant.design](https://ant.design) | 2541 |
+| [arco.design](https://arco.design) | 11 | [vuejs.org](https://vuejs.org) | 60 |
+| [react.dev](https://react.dev) | 39 | [svelte.dev](https://svelte.dev) | 71 |
+| [angular.io](https://angular.io) | 290 | [nuxt.com.cn](https://nuxt.com.cn) | 176 |
 
 **AI / Cloud**
 
 | Site | JS | Site | JS |
 |-----|----|-----|----|
-| [chat.deepseek.com](https://chat.deepseek.com) | 41 | [chat.z.ai](https://chat.z.ai) | 167 |
-| [kimi.moonshot.cn](https://kimi.moonshot.cn) | 383 | [cloud.tencent.com](https://cloud.tencent.com) | 1532 |
-| [docs.qq.com](https://docs.qq.com) | 3617 | [www.aliyun.com](https://www.aliyun.com) | 59 |
+| [chat.deepseek.com](https://chat.deepseek.com) | 41 | [chat.z.ai](https://chat.z.ai) | 168 |
+| [kimi.moonshot.cn](https://kimi.moonshot.cn) | 484 | [cloud.tencent.com](https://cloud.tencent.com) | ⏱ |
+| [docs.qq.com](https://docs.qq.com) | 9 | [www.aliyun.com](https://www.aliyun.com) | ⏱ |
 
 **Enterprise / Collaboration**
 
 | Site | JS | Site | JS |
 |-----|----|-----|----|
-| [feishu.cn](https://www.feishu.cn) | 460 | [dingtalk.com](https://www.dingtalk.com) | 22 |
-| [youzan.com](https://www.youzan.com) | 332 | [kingdee.com](https://www.kingdee.com) | 34 |
-| [chanjet.com](https://www.chanjet.com) | 20 | [landray.com.cn](https://www.landray.com.cn) | 11 |
+| [feishu.cn](https://www.feishu.cn) | ⏱ | [dingtalk.com](https://www.dingtalk.com) | 44 |
+| [youzan.com](https://www.youzan.com) | ⏱ | [kingdee.com](https://www.kingdee.com) | ⏱ |
+| [chanjet.com](https://www.chanjet.com) | 27 | [landray.com.cn](https://www.landray.com.cn) | 46 |
 
 **E-commerce / Portal**
 
 | Site | JS | Site | JS |
 |-----|----|-----|----|
-| [gitee.com](https://gitee.com) | 100 | [baidu.com](https://www.baidu.com) | 314 |
-| [meituan.com](https://www.meituan.com) | 109 | [pinduoduo.com](https://www.pinduoduo.com) | 7 |
-| [bilibili.com](https://www.bilibili.com) | 44 | [juejin.cn](https://www.juejin.cn) | 102 |
+| [gitee.com](https://gitee.com) | ⏱ | [baidu.com](https://www.baidu.com) | 506 |
+| [meituan.com](https://www.meituan.com) | 177 | [pinduoduo.com](https://www.pinduoduo.com) | 11 |
+| [bilibili.com](https://www.bilibili.com) | 369 | [juejin.cn](https://www.juejin.cn) | 102 |
 
 **Government / University**
 
 | Site | JS | Site | JS |
 |-----|----|-----|----|
-| [shanghai.gov.cn](https://www.shanghai.gov.cn) | 42 | [xinhuanet.com](https://www.xinhuanet.com) | 12 |
-| [zju.edu.cn](https://www.zju.edu.cn) | 6 | [tsinghua.edu.cn](https://www.tsinghua.edu.cn) | 17 |
-| [chaoxing.com](https://www.chaoxing.com) | 53 | [www.people.com.cn](https://www.people.com.cn) | 4 |
+| [shanghai.gov.cn](https://www.shanghai.gov.cn) | 131 | [xinhuanet.com](https://www.xinhuanet.com) | 92 |
+| [zju.edu.cn](https://www.zju.edu.cn) | 72 | [tsinghua.edu.cn](https://www.tsinghua.edu.cn) | 37 |
+| [chaoxing.com](https://www.chaoxing.com) | 36 | [www.people.com.cn](https://www.people.com.cn) | 78 |
 
 </details>
 
