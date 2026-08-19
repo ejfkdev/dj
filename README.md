@@ -206,18 +206,20 @@ dj -f md https://example.com
 
 | Option | Description |
 |--------|-------------|
-| `--debug` | Enable debug output |
-| `-f <format>` | Output format: `md` (default), `json`, `text` (bare URL list) |
-| `--no-cache` | Disable cache reads (still saves downloaded files to disk) |
+| `-v, --version` | Print version and exit |
+| `-d, --debug` | Enable debug output |
+| `-f, --format <fmt>` | Output format: `md` (default), `json`, `text` (bare URL list) |
+| `--no-cache` | Disable cache reads (still saves downloaded files to disk); `--cache` / `--cache=false` kept for backward compatibility |
 | `--useragent=<UA>` | Custom User-Agent string |
 | `--ua=<UA>` | Short alias for `--useragent` |
-| `-x <URL>` | Proxy URL (http/https/socks5), overrides environment variables |
+| `-x, --proxy <URL>` | Proxy URL (http/https/socks5), overrides environment variables |
 | `--cookie=<cookies>` | Cookies for bypassing Cloudflare (e.g., `"cf_clearance=xxx"`) |
-| `-H <K: V>` | Custom HTTP header, repeatable (curl-style) |
+| `-H, --header <K: V>` | Custom HTTP header, repeatable (curl-style) |
 | `--no-random-tls` | Disable randomized TLS fingerprint (use fixed Chrome) |
-| `-o <dir>` | Output directory (saves a copy of all files: js/, html/, source_map/, sources/) without site subdir |
-| `-t <secs>` | Per-request timeout in seconds (default: 30) |
-| `-h` | Show help information |
+| `-o, --output <dir>` | Output directory (saves a copy of all files: js/, html/, source_map/, sources/) without site subdir |
+| `-t, --timeout <secs>` | Per-request timeout in seconds (default: 30) |
+| `-c, --concurrency <N>` | Concurrent fetches (default: 8) |
+| `-h, --help` | Show help information |
 
 ### Examples
 

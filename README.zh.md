@@ -206,18 +206,20 @@ dj -f md https://example.com
 
 | 选项 | 说明 |
 |------|------|
-| `--debug` | 启用调试输出 |
-| `-f <format>` | 输出格式：`md`（默认）、`json`、`text`（纯一行一个 URL 列表） |
-| `--no-cache` | 禁用缓存读取（下载的文件仍会保存到磁盘） |
+| `-v, --version` | 打印版本并退出 |
+| `-d, --debug` | 启用调试输出 |
+| `-f, --format <fmt>` | 输出格式：`md`（默认）、`json`、`text`（纯一行一个 URL 列表） |
+| `--no-cache` | 禁用缓存读取（下载的文件仍会保存到磁盘）；`--cache` / `--cache=false` 旧语法保留兼容 |
 | `--useragent=<UA>` | 自定义 User-Agent |
 | `--ua=<UA>` | `--useragent` 的短别名 |
-| `-x <URL>` | 代理地址（http/https/socks5），优先级高于环境变量 |
+| `-x, --proxy <URL>` | 代理地址（http/https/socks5），优先级高于环境变量 |
 | `--cookie=<cookies>` | 注入 Cookie 绕过 Cloudflare（如 `"cf_clearance=xxx"`） |
-| `-H <K: V>` | 自定义 HTTP 请求头，可重复指定（curl 风格） |
+| `-H, --header <K: V>` | 自定义 HTTP 请求头，可重复指定（curl 风格） |
 | `--no-random-tls` | 关闭随机化 TLS 指纹（使用固定 Chrome 指纹） |
-| `-o <dir>` | 输出目录（将所有文件保存一份到此目录：js/、html/、source_map/、sources/，不含站点子目录） |
-| `-t <secs>` | 单个 HTTP 请求超时秒数（默认 30） |
-| `-h` | 显示帮助信息 |
+| `-o, --output <dir>` | 输出目录（将所有文件保存一份到此目录：js/、html/、source_map/、sources/，不含站点子目录） |
+| `-t, --timeout <secs>` | 单个 HTTP 请求超时秒数（默认 30） |
+| `-c, --concurrency <N>` | 并发下载数（默认 8） |
+| `-h, --help` | 显示帮助信息 |
 
 ### 示例
 
