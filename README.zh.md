@@ -31,7 +31,19 @@
 
 dj 的提取器已在 **73 类框架 / 加载模型**、**562 个实测版本**的真实构建产物上验证。
 
-### 打包器（14 类）
+| 分类 | 框架 |
+|------|------|
+| 打包器（14） | `webpack`、`webpack4`、`vite`、`rollup`、`esbuild`、`parcel`、`rsbuild`、`rspack`、`farm`、`mako`、`rolldown`、`systemjs`、`snowpack`、`turbopack` |
+| 微前端框架（17） | `qiankun`、`single-spa`、`micro-app`、`wujie`、`garfish`、`icestark`、`piral`、`luigi`、`emp`、`hel-micro`、`native-federation`、`module-federation`、`mf-runtime`、`mf-vite`、`mf-rsbuild`、`webpack-mf`、`vite-plugin-federation` |
+| 元框架 / SSR（25） | `nuxt`、`sveltekit`、`angular`、`astro`、`qwik`、`solidstart`、`tanstack-start`、`marko`、`react-router`、`remix2`、`redwood`、`analog`、`vike`、`hono`、`one`、`fresh`、`stencil`、`storybook`、`gatsby`、`cra`、`umi`、`icejs`、`vue-cli`、`modernjs`、`bun` |
+| Rust / WASM 前端（3） | `leptos`、`lustre`、`trunk` |
+| 后台模板（12） | `ant-design-pro`、`amis`、`ng-alain`、`jeecg`、`d2admin`、`pig-ui`、`tdesign-starter`、`vue-element-admin`、`vue-pure-admin`、`vue-vben-admin`、`ruoyi-vue2`、`ruoyi-vue3` |
+| 规范 / 垫片（1） | `es-module-shims` |
+
+## 版本明细（点击展开）
+
+<details><summary><b>打包器</b>（14 类，展开查看已验证版本）</summary>
+
 | 框架 | 说明 | 已验证版本 |
 |------|------|------------|
 | **webpack** | webpack 5 运行时 chunk 映射 | v5.0.0 ~ v5.109.2（18 个版本） |
@@ -49,7 +61,10 @@ dj 的提取器已在 **73 类框架 / 加载模型**、**562 个实测版本**�
 | **snowpack** | 无打包 ESM 产物 | v2.18.5 ~ v3.8.8（10 个版本） |
 | **turbopack** | Next.js Turbopack | v15.3.9 ~ v16.3.1（7 个版本） |
 
-### 微前端框架（17 类）
+</details>
+
+<details><summary><b>微前端框架</b>（17 类，展开查看已验证版本）</summary>
+
 | 框架 | 说明 | 已验证版本 |
 |------|------|------------|
 | **qiankun** | qiankun 2.x（含 vite-plugin-qiankun） | v2.1.1 ~ v2.10.16（10 个版本） |
@@ -70,7 +85,10 @@ dj 的提取器已在 **73 类框架 / 加载模型**、**562 个实测版本**�
 | **webpack-mf** | webpack 官方 MF | v5.98.0 ~ v5.108.4（10 个版本） |
 | **vite-plugin-federation** | Origin.js vite 联邦 | v0.0.3 ~ v1.4.1（6 个版本） |
 
-### 元框架 / SSR（25 类）
+</details>
+
+<details><summary><b>元框架 / SSR</b>（25 类，展开查看已验证版本）</summary>
+
 | 框架 | 说明 | 已验证版本 |
 |------|------|------------|
 | **nuxt** | Nuxt | v3.0.0 ~ v4.5.2（8 个版本） |
@@ -99,14 +117,20 @@ dj 的提取器已在 **73 类框架 / 加载模型**、**562 个实测版本**�
 | **modernjs** | Modern.js | v2.0.2 ~ v3.8.2（11 个版本） |
 | **bun** | Bun 打包器 | v0.6.14 ~ v1.3.14（7 个版本） |
 
-### Rust / WASM 前端（3 类）
+</details>
+
+<details><summary><b>Rust / WASM 前端</b>（3 类，展开查看已验证版本）</summary>
+
 | 框架 | 说明 | 已验证版本 |
 |------|------|------------|
 | **leptos** | Leptos | v0.4.10 ~ v0.8.20（5 个版本） |
 | **lustre** | Gleam Lustre | v5.4.0 ~ v5.7.1（4 个版本） |
 | **trunk** | Trunk（wasm-bindgen） | v0.17.5 ~ v0.21.14（5 个版本） |
 
-### 后台模板（12 类）
+</details>
+
+<details><summary><b>后台模板</b>（12 类，展开查看已验证版本）</summary>
+
 | 框架 | 说明 | 已验证版本 |
 |------|------|------------|
 | **ant-design-pro** | Ant Design Pro | v4.4.0 ~ v6.0.3（5 个版本） |
@@ -122,10 +146,16 @@ dj 的提取器已在 **73 类框架 / 加载模型**、**562 个实测版本**�
 | **ruoyi-vue2** | RuoYi-Vue2 | v3.8.9 ~ v3.9.2（3 个版本） |
 | **ruoyi-vue3** | RuoYi-Vue3 | v3.9.1 ~ v3.9.2（2 个版本） |
 
-### 规范 / 垫片（1 类）
+</details>
+
+<details><summary><b>规范 / 垫片</b>（1 类，展开查看已验证版本）</summary>
+
 | 框架 | 说明 | 已验证版本 |
 |------|------|------------|
 | **es-module-shims** | importmap 裸说明符 | v2.1.2 ~ v2.8.4（8 个版本） |
+
+</details>
+
 
 ## 安装
 

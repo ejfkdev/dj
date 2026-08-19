@@ -31,7 +31,19 @@
 
 dj's extractor is verified against real build output across **73 frameworks / loading models** and **562 versions**.
 
-### Bundlers (14)
+| Category | Frameworks |
+|----------|------------|
+| Bundlers (14) | `webpack`, `webpack4`, `vite`, `rollup`, `esbuild`, `parcel`, `rsbuild`, `rspack`, `farm`, `mako`, `rolldown`, `systemjs`, `snowpack`, `turbopack` |
+| Microfrontend frameworks (17) | `qiankun`, `single-spa`, `micro-app`, `wujie`, `garfish`, `icestark`, `piral`, `luigi`, `emp`, `hel-micro`, `native-federation`, `module-federation`, `mf-runtime`, `mf-vite`, `mf-rsbuild`, `webpack-mf`, `vite-plugin-federation` |
+| Meta frameworks / SSR (25) | `nuxt`, `sveltekit`, `angular`, `astro`, `qwik`, `solidstart`, `tanstack-start`, `marko`, `react-router`, `remix2`, `redwood`, `analog`, `vike`, `hono`, `one`, `fresh`, `stencil`, `storybook`, `gatsby`, `cra`, `umi`, `icejs`, `vue-cli`, `modernjs`, `bun` |
+| Rust / WASM frontends (3) | `leptos`, `lustre`, `trunk` |
+| Admin templates (12) | `ant-design-pro`, `amis`, `ng-alain`, `jeecg`, `d2admin`, `pig-ui`, `tdesign-starter`, `vue-element-admin`, `vue-pure-admin`, `vue-vben-admin`, `ruoyi-vue2`, `ruoyi-vue3` |
+| Spec / polyfills (1) | `es-module-shims` |
+
+## Version details (click to expand)
+
+<details><summary><b>Bundlers</b> (14 — expand for verified versions)</summary>
+
 | Framework | Notes | Verified versions |
 |-----------|-------|-------------------|
 | **webpack** | webpack 5 runtime chunk maps | v5.0.0 ~ v5.109.2（18 个版本） |
@@ -49,7 +61,10 @@ dj's extractor is verified against real build output across **73 frameworks / lo
 | **snowpack** | unbundled ESM output | v2.18.5 ~ v3.8.8（10 个版本） |
 | **turbopack** | Next.js turbopack | v15.3.9 ~ v16.3.1（7 个版本） |
 
-### Microfrontend frameworks (17)
+</details>
+
+<details><summary><b>Microfrontend frameworks</b> (17 — expand for verified versions)</summary>
+
 | Framework | Notes | Verified versions |
 |-----------|-------|-------------------|
 | **qiankun** | qiankun 2.x (incl. vite-plugin-qiankun) | v2.1.1 ~ v2.10.16（10 个版本） |
@@ -70,7 +85,10 @@ dj's extractor is verified against real build output across **73 frameworks / lo
 | **webpack-mf** | webpack built-in MF | v5.98.0 ~ v5.108.4（10 个版本） |
 | **vite-plugin-federation** | Origin.js federation | v0.0.3 ~ v1.4.1（6 个版本） |
 
-### Meta frameworks / SSR (25)
+</details>
+
+<details><summary><b>Meta frameworks / SSR</b> (25 — expand for verified versions)</summary>
+
 | Framework | Notes | Verified versions |
 |-----------|-------|-------------------|
 | **nuxt** | Nuxt | v3.0.0 ~ v4.5.2（8 个版本） |
@@ -99,14 +117,20 @@ dj's extractor is verified against real build output across **73 frameworks / lo
 | **modernjs** | Modern.js | v2.0.2 ~ v3.8.2（11 个版本） |
 | **bun** | Bun bundler | v0.6.14 ~ v1.3.14（7 个版本） |
 
-### Rust / WASM frontends (3)
+</details>
+
+<details><summary><b>Rust / WASM frontends</b> (3 — expand for verified versions)</summary>
+
 | Framework | Notes | Verified versions |
 |-----------|-------|-------------------|
 | **leptos** | Leptos | v0.4.10 ~ v0.8.20（5 个版本） |
 | **lustre** | Gleam Lustre | v5.4.0 ~ v5.7.1（4 个版本） |
 | **trunk** | Trunk (wasm-bindgen) | v0.17.5 ~ v0.21.14（5 个版本） |
 
-### Admin templates (12)
+</details>
+
+<details><summary><b>Admin templates</b> (12 — expand for verified versions)</summary>
+
 | Framework | Notes | Verified versions |
 |-----------|-------|-------------------|
 | **ant-design-pro** | Ant Design Pro | v4.4.0 ~ v6.0.3（5 个版本） |
@@ -122,10 +146,16 @@ dj's extractor is verified against real build output across **73 frameworks / lo
 | **ruoyi-vue2** | RuoYi-Vue2 | v3.8.9 ~ v3.9.2（3 个版本） |
 | **ruoyi-vue3** | RuoYi-Vue3 | v3.9.1 ~ v3.9.2（2 个版本） |
 
-### Spec / polyfills (1)
+</details>
+
+<details><summary><b>Spec / polyfills</b> (1 — expand for verified versions)</summary>
+
 | Framework | Notes | Verified versions |
 |-----------|-------|-------------------|
 | **es-module-shims** | importmap bare specifiers | v2.1.2 ~ v2.8.4（8 个版本） |
+
+</details>
+
 
 ## Installation
 
