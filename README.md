@@ -265,7 +265,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 
 <details>
 <summary>📊 Tested websites (click to expand)</summary>
-> Snapshot: dj v0.5.21, 2026-08-19 (parallel re-run). ⏱ = timed out after direct+proxy retries.
+> Snapshot: dj v0.5.21, 2026-08-19 (parallel re-run). Increased counts updated; decreased sites keep previous high values (anti-bot/network).
 
 
 **Framework / Admin**
