@@ -35,7 +35,7 @@ jobs:
           fi
           output="dj-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
           TAG="${GITHUB_REF#refs/tags/}"
-          CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${TAG}" -o "${output}" .
+          CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${TAG} -X github.com/ejfkdev/xyz-go.Version=${TAG}" -o "${output}" .
 
       - name: Install UPX
         if: matrix.goos == 'linux' || (matrix.goos == 'windows' && matrix.goarch == 'amd64')

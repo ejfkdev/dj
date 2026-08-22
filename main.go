@@ -1,22 +1,20 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/ejfkdev/dj/pkg/extractor"
 	"github.com/ejfkdev/dj/pkg/fetcher"
-	"github.com/ejfkdev/dj/pkg/plugins"
+
+	xyz "github.com/ejfkdev/xyz-go"
+	"github.com/ejfkdev/xyz-go/registry"
+	"github.com/ejfkdev/xyz-go/spec"
 )
 
-var version = "dev"  // 版本号，通过 -ldflags "-X main.version=x.x.x" 设置
-var outputDir string // -o/--output 输出目录（包级变量，printHelp 需要访问）
+var version = "dev" // 版本号，通过 -ldflags "-X main.version=x.x.x" 设置
 
 // parseFormat 输出格式字符串转换为内部常量
 func parseFormat(s string) (extractor.OutputFormat, bool) {
@@ -36,8 +34,12 @@ func printHelp() {
 	fmt.Printf("dj - JS/SourceMap Extractor %s\n", version)
 	fmt.Printf("Extract JS URLs and source maps from websites\n")
 	fmt.Printf("GitHub: https://github.com/ejfkdev/dj\n\n")
-	fmt.Printf("Usage: dj [options] <url>\n\n")
-	fmt.Printf("Options:\n")
+	fmt.Printf("Usage:\n")
+	fmt.Printf("  dj [options] <url>        scan a website (equivalent to: dj scan [options] <url>)\n")
+	fmt.Printf("  dj scan [options] <url>   canonical subcommand form\n")
+	fmt.Printf("  dj serve [--addr :8080]   HTTP API (REST + /openapi.json + /mcp on one port)\n")
+	fmt.Printf("  dj mcp stdio|sse|http     MCP tool server (scan exposed as an MCP tool)\n\n")
+	fmt.Printf("Options (apply to the scan command):\n")
 	fmt.Printf("  -v, --version            print version and exit\n")
 	fmt.Printf("  -d, --debug              enable debug output\n")
 	fmt.Printf("  -f, --format <fmt>       output format: md (default) | json | text (bare URL list)\n")
@@ -53,12 +55,14 @@ func printHelp() {
 	fmt.Printf("  -c, --concurrency <N>    max concurrent HTTP requests (default: 8)\n")
 	fmt.Printf("  -h, --help               show this help\n\n")
 	fmt.Printf("Notes:\n")
-	fmt.Printf("  - URL is the first non-flag argument; flags can appear before or after it\n")
+	fmt.Printf("  - URL is the first positional argument; flags can appear before or after it\n")
 	fmt.Printf("  - Flag values can be passed as --flag=value or as the next argument\n")
 	fmt.Printf("  - --header can be specified multiple times; later values override earlier ones\n")
 	fmt.Printf("  - --header overrides default browser headers (e.g. User-Agent, Accept)\n")
 	fmt.Printf("  - -o saves a copy of all files to the output dir (js/, html/, source_map/, sources/)\n")
-	fmt.Printf("    without the site subdirectory level; cache dir is still written normally\n\n")
+	fmt.Printf("    without the site subdirectory level; cache dir is still written normally\n")
+	fmt.Printf("  - 'dj scan -h' shows the auto-generated per-flag help; serve/mcp take --addr,\n")
+	fmt.Printf("    --bearer, --tls-cert/--tls-key, --cors and --timeout flags\n\n")
 	fmt.Printf("Examples:\n")
 	fmt.Printf("  dj https://example.com\n")
 	fmt.Printf("  dj -f md https://example.com\n")
@@ -71,322 +75,115 @@ func printHelp() {
 	fmt.Printf("  dj -t 60 https://example.com\n")
 	fmt.Printf("  dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com\n")
 	fmt.Printf("  dj https://example.com -f text\n")
-	if outputDir != "" {
-		fmt.Printf("Cache path: %s\nOutput path: %s\n", fetcher.GetTempDir(), outputDir)
-	} else {
-		fmt.Printf("Cache path: %s\n", fetcher.GetTempDir())
-	}
+	fmt.Printf("  dj serve --addr 127.0.0.1:8080\n")
+	fmt.Printf("  dj mcp stdio\n")
+	fmt.Printf("Cache path: %s\n", fetcher.GetTempDir())
 }
 
 func main() {
-	// 解析参数
-	var debug bool
-	var enableCache = true // 默认开启缓存
-	var showHelp bool
-	var outputFormat = extractor.FormatMD // 默认 markdown
-	var userAgent string
-	var proxy string
-	var cookie string
-	var url string
-	var noRandomTLS bool         // --no-random-tls 关闭随机化 TLS 指纹
-	var rawHeaders []string      // 收集所有 -H/--header 值，最后一次性解析
-	var timeoutSecs int = 30     // -t/--timeout 单个 HTTP 请求超时秒数
-	var fetchConcurrency int = 8 // -c/--concurrency 并发下载数
-
-	// 取下一段参数值（支持 --flag value 和 --flag=value 两种形式）
-	nextValue := func(i *int) (string, bool) {
-		if *i+1 >= len(os.Args) {
-			return "", false
-		}
-		v := os.Args[*i+1]
-		if strings.HasPrefix(v, "-") && v != "-" {
-			return "", false
-		}
-		*i++
-		return v, true
+	reg := registry.New()
+	if _, err := spec.Define("scan", scanHandler).
+		Summary("Extract JS URLs and source maps from a website").
+		Description("Crawl a URL, discover its JS files and source maps, and restore original sources when available. All input fields mirror the legacy dj flags (concurrency, timeout, proxy, headers, output dir, format...).").
+		CLI(spec.CliHints{Usage: "<url>"}).
+		HTTP(spec.HTTPHints{Method: "POST", Path: "/scan"}).
+		MCP(spec.MCPHints{Annotations: []string{"read", "title:scan a website for JS and source maps"}}).
+		Register(reg); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
 	}
 
-	// 分割 --flag=value 形式
-	splitEq := func(arg string) (string, string) {
-		if idx := strings.Index(arg, "="); idx > 0 {
-			return arg[:idx], arg[idx+1:]
-		}
-		return arg, ""
+	args, scanMode := buildArgs(os.Args[1:])
+	code := xyz.RunConfig(reg, args, xyz.Config{})
+	// 旧版 dj 的用法错误退出码是 1（xyz 的 invalid_input 是 2），扫描路径统一回 1
+	if scanMode && code == 2 {
+		code = 1
 	}
+	os.Exit(code)
+}
 
-	for i := 1; i < len(os.Args); i++ {
-		arg := os.Args[i]
-		name, val := splitEq(arg)
-
-		switch {
-		case name == "--version" || name == "-v":
-			fmt.Printf("dj %s\n", version)
-			os.Exit(0)
-		case name == "--debug" || name == "-d" || name == "-debug":
-			debug = true
-		case name == "--no-cache":
-			enableCache = false
-		case name == "--cache":
-			// 兼容旧语法 --cache=false
-			if val == "" {
-				if v, ok := nextValue(&i); ok {
-					val = v
-				}
-			}
-			switch val {
-			case "", "true", "1", "yes", "on":
-				enableCache = true
-			case "false", "0", "no", "off":
-				enableCache = false
-			default:
-				fmt.Fprintf(os.Stderr, "invalid --cache value: %q\n", val)
-				os.Exit(1)
-			}
-		case name == "--format" || name == "-f":
-			if val == "" {
-				if v, ok := nextValue(&i); ok {
-					val = v
-				} else {
-					fmt.Fprintln(os.Stderr, "missing value for --format/-f")
-					os.Exit(1)
-				}
-			}
-			if f, ok := parseFormat(val); ok {
-				outputFormat = f
-			} else {
-				fmt.Fprintf(os.Stderr, "invalid --format value: %q (expected: text|json|md)\n", val)
-				os.Exit(1)
-			}
-		case name == "--useragent" || name == "--ua":
-			if val == "" {
-				if v, ok := nextValue(&i); ok {
-					val = v
-				} else {
-					fmt.Fprintln(os.Stderr, "missing value for --useragent")
-					os.Exit(1)
-				}
-			}
-			userAgent = val
-		case name == "--proxy" || name == "-x":
-			if val == "" {
-				if v, ok := nextValue(&i); ok {
-					val = v
-				} else {
-					fmt.Fprintln(os.Stderr, "missing value for --proxy")
-					os.Exit(1)
-				}
-			}
-			proxy = val
-		case name == "--no-random-tls":
-			noRandomTLS = true
-		case name == "--cookie":
-			if val == "" {
-				if v, ok := nextValue(&i); ok {
-					val = v
-				} else {
-					fmt.Fprintln(os.Stderr, "missing value for --cookie")
-					os.Exit(1)
-				}
-			}
-			cookie = val
-		case name == "--output" || name == "-o":
-			if val == "" {
-				if v, ok := nextValue(&i); ok {
-					val = v
-				} else {
-					fmt.Fprintln(os.Stderr, "missing value for --output/-o")
-					os.Exit(1)
-				}
-			}
-			outputDir = val
-		case name == "--timeout" || name == "-t":
-			if val == "" {
-				if v, ok := nextValue(&i); ok {
-					val = v
-				} else {
-					fmt.Fprintln(os.Stderr, "missing value for --timeout/-t")
-					os.Exit(1)
-				}
-			}
-			n, err := strconv.Atoi(val)
-			if err != nil || n <= 0 {
-				fmt.Fprintf(os.Stderr, "invalid --timeout value: %q\n", val)
-				os.Exit(1)
-			}
-			timeoutSecs = n
-		case name == "--concurrency" || name == "-c":
-			if val == "" {
-				if v, ok := nextValue(&i); ok {
-					val = v
-				} else {
-					fmt.Fprintln(os.Stderr, "missing value for --concurrency/-c")
-					os.Exit(1)
-				}
-			}
-			n, err := strconv.Atoi(val)
-			if err != nil || n < 1 || n > 256 {
-				fmt.Fprintf(os.Stderr, "invalid --concurrency value: %q (expect 1-256)\n", val)
-				os.Exit(1)
-			}
-			fetchConcurrency = n
-		case name == "--header" || name == "-H":
-			if val == "" {
-				if v, ok := nextValue(&i); ok {
-					val = v
-				} else {
-					fmt.Fprintln(os.Stderr, "missing value for --header/-H")
-					os.Exit(1)
-				}
-			}
-			if !strings.Contains(val, ":") {
-				fmt.Fprintf(os.Stderr, "invalid --header value %q (expected \"Key: Value\" format)\n", val)
-				os.Exit(1)
-			}
-			rawHeaders = append(rawHeaders, val)
-		case name == "--help" || name == "-h":
-			showHelp = true
-		case strings.HasPrefix(name, "-"):
-			// 未知 flag
-			fmt.Fprintf(os.Stderr, "unknown flag: %s\n", arg)
-			os.Exit(1)
-		default:
-			// 第一个非 flag 位置参数视为 URL
-			if url == "" {
-				url = arg
-			}
-		}
+// buildArgs 把进程参数归一化为 xyz 派发器能识别的形式，并保持旧版 dj 的参数习惯：
+//   - 首参是 serve/mcp/completion 时原样交给 xyz（HTTP/MCP 模式）
+//   - -h/--help/help 与无参数走旧版 printHelp（-h 退出 0，无参数退出 1）
+//   - 其余情况前面补 "scan"，因此 `dj <flags> <url>` 与 `dj scan <flags> <url>` 等价
+//   - 旧拼写兼容：--ua → --useragent，-debug → --debug，--cache 的布尔词归一化
+//   - scan 参数里出现 -v/--version 立即打印版本退出（与旧版一致）
+func buildArgs(args []string) ([]string, bool) {
+	if len(args) == 0 {
+		printHelp()
+		os.Exit(1)
 	}
-
-	if showHelp {
+	switch args[0] {
+	case "serve", "mcp", "completion":
+		return args, false
+	case "scan":
+		return args, true
+	case "-h", "--help", "help":
 		printHelp()
 		os.Exit(0)
 	}
 
-	if url == "" {
-		printHelp()
-		os.Exit(1)
-	}
-
-	// 初始化插件注册中心
-	registry := extractor.NewPluginRegistry()
-
-	// 注册内置插件
-	registry.Register(plugins.NewHTMLScriptPlugin())
-	registry.Register(plugins.NewDynamicImportPlugin())
-	registry.Register(plugins.NewWebpackPlugin())
-	registry.Register(plugins.NewNextJSPlugin())
-	registry.Register(plugins.NewNuxtJSPlugin())
-	registry.Register(plugins.NewVitePlugin())
-	registry.Register(plugins.NewSvelteKitPlugin())
-	registry.Register(plugins.NewRequireJSPlugin())
-	registry.Register(plugins.NewModuleFederationPlugin())
-	registry.Register(plugins.NewModuleFederationManifestPlugin())
-	registry.Register(plugins.NewHelMicroPlugin())
-	registry.Register(plugins.NewESMImportPlugin())
-	registry.Register(plugins.NewScriptCreatePlugin())
-	registry.Register(plugins.NewModernJSPlugin())
-	registry.Register(plugins.NewURLPatternPlugin())
-	registry.Register(plugins.NewSourceMapPlugin())
-	registry.Register(plugins.NewUmiJSPlugin())
-	// 微前端子应用入口（entry/proEntry/url 指向子应用 HTML 目录，按框架拆分）
-	registry.Register(plugins.NewQiankunPlugin())
-	registry.Register(plugins.NewGarfishPlugin())
-	registry.Register(plugins.NewMicroAppPlugin())
-	registry.Register(plugins.NewWujiePlugin())
-	registry.Register(plugins.NewIcestarkPlugin())
-	// Trunk（Rust wasm 打包器）sitemap.json 清单
-	registry.Register(plugins.NewTrunkPlugin())
-	// 多页/iframe HTML 入口递归提取（同源链接 + .html 字面量 + 目录列表）
-	registry.Register(plugins.NewHTMLPivotPlugin())
-	// EMP（@efox/emp）emp.json 联邦清单探测与解析
-	registry.Register(plugins.NewEmpPlugin())
-	// 通用 URL 兜底提取（编码还原后做宽匹配，捕获 document.write 等其他插件未覆盖的场景）
-	registry.Register(plugins.NewUniversalURLPlugin())
-
-	// 创建 Pipeline
-	pipeline := extractor.NewPipeline(registry)
-	pipeline.Debug = debug
-
-	// 设置 Fetcher 配置（代理、User-Agent 和 TLS 指纹模式）
-	ua := userAgent
-	if ua == "" {
-		ua = fetcher.DefaultUserAgent
-	}
-	fpMode := fetcher.TLSFingerprintRandom
-	if noRandomTLS {
-		fpMode = fetcher.TLSFingerprintChrome
-	}
-	pipeline.SetFetcherConfig(proxy, ua, fpMode, time.Duration(timeoutSecs)*time.Second)
-	pipeline.SetFetchConcurrency(fetchConcurrency)
-
-	// 注入 cookie（用于绕过 Cloudflare 等防护）
-	if cookie != "" {
-		if err := pipeline.SetBrowserCookies(url, parseCookies(cookie)); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to set cookies: %v\n", err)
+	out := make([]string, 0, len(args)+1)
+	out = append(out, "scan")
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			out = append(out, args[i:]...)
+			break
 		}
-	}
-
-	// 注入自定义 HTTP 请求头
-	if len(rawHeaders) > 0 {
-		headers, err := parseHeaders(rawHeaders)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to parse --header: %v\n", err)
-			os.Exit(1)
-		}
-		pipeline.SetExtraHeaders(headers)
-		if debug {
-			fmt.Fprintf(os.Stderr, "Custom headers: %d\n", len(headers))
-		}
-	}
-
-	// 设置缓存配置
-	// --cache=false 时 Enable=false 但 WriteEnabled=true：每次都走网络下载（不读缓存），
-	// 但下载的 JS / source map / 还原源码仍然保存到磁盘。
-	cacheConfig := &fetcher.CacheConfig{
-		Enable:       enableCache,
-		WriteEnabled: !enableCache, // cache=false 时仍写磁盘
-		BaseDir:      fetcher.GetTempDir(),
-		OutputDir:    outputDir, // -o 指定时额外写一份到该目录（不带域名层级）
-	}
-	pipeline.SetCacheConfig(cacheConfig)
-
-	// 执行
-	// -t/--timeout 现在控制单个 HTTP 请求超时（传给 fetcher），不再是整体运行超时。
-	// pipeline 不设整体超时上限，确保 JS 数量多的站点也能完整爬取。
-	ctx := context.Background()
-
-	// text 模式：实时输出；json/md 模式：收集后统一输出
-	if outputFormat == extractor.FormatText {
-		// 实时打印模式
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for url := range pipeline.GetFoundCh() {
-				fmt.Println(url)
+		switch {
+		case a == "-v" || a == "--version":
+			fmt.Printf("dj %s\n", version)
+			os.Exit(0)
+		case a == "--ua":
+			out = append(out, "--useragent")
+		case strings.HasPrefix(a, "--ua="):
+			out = append(out, "--useragent="+strings.TrimPrefix(a, "--ua="))
+		case a == "-debug":
+			out = append(out, "--debug")
+		case a == "--cache":
+			// 旧语义：裸 --cache 会吞掉下一个非 - 参数，是布尔词则按值处理，否则报错
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++
+				switch cacheWordToFlag(args[i]) {
+				case "--cache":
+					out = append(out, "--cache")
+				case "--cache=false":
+					out = append(out, "--cache=false")
+				default:
+					fmt.Fprintf(os.Stderr, "invalid --cache value: %q\n", args[i])
+					os.Exit(1)
+				}
+				continue
 			}
-		}()
-
-		_, err := pipeline.Run(ctx, url)
-		wg.Wait()
-
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Pipeline error: %v\n", err)
-			os.Exit(1)
+			out = append(out, "--cache")
+		case strings.HasPrefix(a, "--cache="):
+			switch cacheWordToFlag(strings.TrimPrefix(a, "--cache=")) {
+			case "--cache":
+				out = append(out, "--cache")
+			case "--cache=false":
+				out = append(out, "--cache=false")
+			default:
+				fmt.Fprintf(os.Stderr, "invalid --cache value: %q\n", strings.TrimPrefix(a, "--cache="))
+				os.Exit(1)
+			}
+		default:
+			out = append(out, a)
 		}
-		// text 模式：纯流式一行一个 URL，不再追加汇总（汇总去 -f md）
-	} else {
-		// json/md 模式：收集所有 URL 后统一输出
-		_, err := pipeline.Run(ctx, url)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Pipeline error: %v\n", err)
-			os.Exit(1)
-		}
-
-		// 输出格式化结果
-		result := pipeline.GetOutputResult()
-		fmt.Print(extractor.FormatOutput(outputFormat, result))
 	}
+	return out, true
+}
+
+// cacheWordToFlag 把旧版 --cache 的布尔词映射为 xyz bool flag 形态。
+// 空串在旧版语义中等价于 true。
+func cacheWordToFlag(word string) string {
+	switch word {
+	case "", "true", "1", "yes", "on":
+		return "--cache"
+	case "false", "0", "no", "off":
+		return "--cache=false"
+	}
+	return "invalid"
 }
 
 // parseCookies 解析 cookie 字符串为 http.Cookie 切片

@@ -582,6 +582,9 @@ func (p *Pipeline) getJSCachePath(url string) (filename string, ok bool) {
 	if !strings.HasPrefix(url, "https://") {
 		scheme = "http://"
 	}
+	if len(url) <= len(scheme) {
+		return "", false
+	}
 	urlHostEnd := len(scheme) + len(host) // 注意 host 已被 : -> _，不是原始长度
 	// 上面 host 已经是去掉 : 的形式，需要从原始 url 重新计算 host 长度
 	// 重新提取原始 host（含冒号和端口）

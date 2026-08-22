@@ -26,6 +26,7 @@
 - 环境变量代理配置（`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 等）
 - 自定义 User-Agent 和浏览器请求头模拟
 - 多种输出格式：text、json、markdown
+- **一次定义、三种使用方式**（基于 [xyz-go](https://github.com/ejfkdev/xyz-go)）：CLI（`dj scan` / 兼容旧写法 `dj <url>`）、HTTP REST API（`dj serve`，含 `/openapi.json`）、MCP 工具服务（`dj mcp stdio|sse|http`）
 
 ## 支持的框架与加载模型
 
@@ -186,14 +187,19 @@ go build -ldflags="-X main.version=1.0.0" -o dj .
 ## 使用方法
 
 ```bash
-dj [选项] <URL>
+dj [选项] <URL>               # 等价于：dj scan [选项] <URL>
 ```
+
+dj 由 [xyz-go](https://github.com/ejfkdev/xyz-go)（“一次定义、三个接口”）驱动：`scan` 命令只定义一次，即同时获得 CLI 子命令、HTTP REST API（`dj serve`）与 MCP 工具服务（`dj mcp`）三种使用方式。原有的 `dj [选项] <URL>` 形式保留为兼容壳，所有旧 flag、别名（`--ua`、`-debug`）与行为均不变。
 
 ### 基本用法
 
 ```bash
-# 提取 JS URL（实时输出）
+# 提取 JS URL（等价于 dj scan https://example.com）
 dj https://example.com
+
+# 规范的子命令形式；'dj scan -h' 可按字段查看自动生成的帮助（含默认值提示）
+dj scan https://example.com
 
 # 输出 JSON 格式
 dj -f json https://example.com
@@ -201,6 +207,33 @@ dj -f json https://example.com
 # 输出 Markdown 格式
 dj -f md https://example.com
 ```
+
+### HTTP API
+
+启动 REST 服务（同一端口提供 REST + `/openapi.json` + MCP 端点 `/mcp`）：
+
+```bash
+dj serve --addr 127.0.0.1:8080          # 鉴权：--bearer a,b；TLS：--tls-cert + --tls-key；CORS：--cors origins
+```
+
+| 端点 | 说明 |
+|------|------|
+| `GET /healthz` | 健康检查 → `{"status":"ok"}` |
+| `GET /openapi.json` | 由 scan 入参 schema 生成的 OpenAPI 3 文档 |
+| `POST /scan` | 执行扫描；JSON body 与 CLI 参数一一对应（`url` 必填），如 `{"url":"https://example.com","format":"json","concurrency":4}` → 结构化 JSON 结果（`format=md`/`text` 时返回报告字符串） |
+| `POST /mcp` | 同端口挂载的 MCP（streamable HTTP）端点 |
+
+### MCP
+
+把 `scan` 以 MCP 工具形式暴露，支持 stdio、SSE 与 streamable HTTP 三种传输：
+
+```bash
+dj mcp stdio                            # stdio 传输（本地 Agent 常用）
+dj mcp sse --addr 127.0.0.1:8080       # SSE 传输
+dj mcp http --addr 127.0.0.1:8080      # streamable HTTP（协议 2026-07-28 需加 --stateless）
+```
+
+`scan` 工具的入参与 CLI 参数同名（`url`、`concurrency`、`timeout`、`proxy`、`format` 等）；`structuredContent` 返回 JSON 结果，`textContent` 返回 Markdown 报告。
 
 ### 命令行选项
 
@@ -219,6 +252,7 @@ dj -f md https://example.com
 | `-o, --output <dir>` | 输出目录（将所有文件保存一份到此目录：js/、html/、source_map/、sources/，不含站点子目录） |
 | `-t, --timeout <secs>` | 单个 HTTP 请求超时秒数（默认 30） |
 | `-c, --concurrency <N>` | 全局 HTTP 并发上限——下载、探测、HEAD/RSC 共享同一预算（默认 8） |
+| `--json` | 新增全局 flag：以原始 JSON 输出扫描结果（取代人类可读渲染） |
 | `-h, --help` | 显示帮助信息 |
 
 ### 示例
@@ -263,7 +297,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 
 <details>
 <summary>📊 测试网站（点击展开）</summary>
-> 测试快照：dj v0.5.21，2026-08-19（并行重测）。数量增加的已更新；减少的站点保留历史高值（风控/网络因素）。
+> 测试快照：dj v0.5.21，2026-08-21（并行重测）。数量增加的已更新；减少的站点保留历史高值（风控/网络因素）。
 
 
 **框架 / 后台管理**
@@ -273,7 +307,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 | [vue.ruoyi.vip](https://vue.ruoyi.vip) | 74 | [demo.1panel.cn](https://demo.1panel.cn) | 590 |
 | [show.cool-admin.com/login](https://show.cool-admin.com/login) | 135 | [ant.design](https://ant.design) | 2541 |
 | [arco.design](https://arco.design) | 461 | [vuejs.org](https://vuejs.org) | 56 |
-| [react.dev](https://react.dev) | 38 | [svelte.dev](https://svelte.dev) | 74 |
+| [react.dev](https://react.dev) | 38 | [svelte.dev](https://svelte.dev) | 189 |
 | [angular.io](https://angular.io) | 290 | [nuxt.com.cn](https://nuxt.com.cn) | 179 |
 
 **AI / 云平台**
@@ -289,7 +323,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 | 站点 | JS | 站点 | JS |
 |------|----|------|----|
 | [feishu.cn](https://www.feishu.cn) | 460 | [dingtalk.com](https://www.dingtalk.com) | 26 |
-| [youzan.com](https://www.youzan.com) | 332 | [kingdee.com](https://www.kingdee.com) | 165 |
+| [youzan.com](https://www.youzan.com) | 1254 | [kingdee.com](https://www.kingdee.com) | 165 |
 | [chanjet.com](https://www.chanjet.com) | 20 | [landray.com.cn](https://www.landray.com.cn) | 46 |
 
 **电商 / 门户**

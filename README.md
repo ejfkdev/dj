@@ -26,6 +26,7 @@
 - Environment variable proxy configuration (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, etc.)
 - Custom User-Agent and browser-like request headers
 - Multiple output formats: text, JSON, markdown
+- **Three interfaces, one definition** (via [xyz-go](https://github.com/ejfkdev/xyz-go)): CLI (`dj scan` / legacy `dj <url>`), HTTP REST API (`dj serve` with `/openapi.json`), and MCP tool server (`dj mcp stdio|sse|http`)
 
 ## Supported Frameworks & Loading Models
 
@@ -186,14 +187,19 @@ Visit the [Releases](https://github.com/ejfkdev/dj/releases) page to download bi
 ## Usage
 
 ```bash
-dj [options] <URL>
+dj [options] <URL>          # same as: dj scan [options] <URL>
 ```
+
+`dj` is powered by [xyz-go](https://github.com/ejfkdev/xyz-go) ("one definition, three interfaces"): the `scan` command is defined once and exposed as a CLI subcommand, an HTTP REST API (`dj serve`) and an MCP tool server (`dj mcp`). The plain `dj [options] <URL>` form is kept as a compatibility shim on top — all legacy flags, aliases (`--ua`, `-debug`) and behaviors are preserved.
 
 ### Basic usage
 
 ```bash
-# Extract JS URLs (real-time output)
+# Extract JS URLs (equivalent to: dj scan https://example.com)
 dj https://example.com
+
+# Canonical subcommand form; 'dj scan -h' shows per-flag help with defaults
+dj scan https://example.com
 
 # Output in JSON format
 dj -f json https://example.com
@@ -201,6 +207,33 @@ dj -f json https://example.com
 # Output in Markdown format
 dj -f md https://example.com
 ```
+
+### HTTP API
+
+Run the REST server (REST + `/openapi.json` + MCP endpoint `/mcp` on one port):
+
+```bash
+dj serve --addr 127.0.0.1:8080          # bear tokens: --bearer a,b; TLS: --tls-cert + --tls-key; CORS: --cors origins
+```
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /healthz` | Liveness probe → `{"status":"ok"}` |
+| `GET /openapi.json` | OpenAPI 3 document generated from the scan input schema |
+| `POST /scan` | Run a scan; JSON body mirrors the CLI flags (`url` required), e.g. `{"url":"https://example.com","format":"json","concurrency":4}` → structured JSON result (pass `format=md`/`text` to get the report as a string) |
+| `POST /mcp` | MCP (streamable HTTP) endpoint mounted on the same port |
+
+### MCP
+
+Expose `scan` as an MCP tool over stdio, SSE or streamable HTTP:
+
+```bash
+dj mcp stdio                             # stdio transport (local agents)
+dj mcp sse --addr 127.0.0.1:8080        # SSE transport
+dj mcp http --addr 127.0.0.1:8080       # streamable HTTP (add --stateless for protocol 2026-07-28)
+```
+
+The `scan` tool takes the same fields as the CLI flags (`url`, `concurrency`, `timeout`, `proxy`, `format`, ...); `structuredContent` carries the JSON result and `textContent` the Markdown report.
 
 ### Command line options
 
@@ -219,6 +252,7 @@ dj -f md https://example.com
 | `-o, --output <dir>` | Output directory (saves a copy of all files: js/, html/, source_map/, sources/) without site subdir |
 | `-t, --timeout <secs>` | Per-request timeout in seconds (default: 30) |
 | `-c, --concurrency <N>` | Max concurrent HTTP requests — downloads, probes, HEAD/RSC share this budget (default: 8) |
+| `--json` | New global flag: emit the scan result as raw JSON instead of human-readable output |
 | `-h, --help` | Show help information |
 
 ### Examples
@@ -265,7 +299,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 
 <details>
 <summary>📊 Tested websites (click to expand)</summary>
-> Snapshot: dj v0.5.21, 2026-08-19 (parallel re-run). Increased counts updated; decreased sites keep previous high values (anti-bot/network).
+> Snapshot: dj v0.5.21, 2026-08-21 (parallel re-run). Increased counts updated; decreased sites keep previous high values (anti-bot/network).
 
 
 **Framework / Admin**
@@ -275,7 +309,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 | [vue.ruoyi.vip](https://vue.ruoyi.vip) | 74 | [demo.1panel.cn](https://demo.1panel.cn) | 590 |
 | [show.cool-admin.com/login](https://show.cool-admin.com/login) | 135 | [ant.design](https://ant.design) | 2541 |
 | [arco.design](https://arco.design) | 461 | [vuejs.org](https://vuejs.org) | 56 |
-| [react.dev](https://react.dev) | 38 | [svelte.dev](https://svelte.dev) | 74 |
+| [react.dev](https://react.dev) | 38 | [svelte.dev](https://svelte.dev) | 189 |
 | [angular.io](https://angular.io) | 290 | [nuxt.com.cn](https://nuxt.com.cn) | 179 |
 
 **AI / Cloud**
@@ -291,7 +325,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 | Site | JS | Site | JS |
 |-----|----|-----|----|
 | [feishu.cn](https://www.feishu.cn) | 460 | [dingtalk.com](https://www.dingtalk.com) | 26 |
-| [youzan.com](https://www.youzan.com) | 332 | [kingdee.com](https://www.kingdee.com) | 165 |
+| [youzan.com](https://www.youzan.com) | 1254 | [kingdee.com](https://www.kingdee.com) | 165 |
 | [chanjet.com](https://www.chanjet.com) | 20 | [landray.com.cn](https://www.landray.com.cn) | 46 |
 
 **E-commerce / Portal**
