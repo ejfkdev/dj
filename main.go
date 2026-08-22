@@ -85,7 +85,7 @@ func main() {
 	if _, err := spec.Define("scan", scanHandler).
 		Summary("Extract JS URLs and source maps from a website").
 		Description("Crawl a URL, discover its JS files and source maps, and restore original sources when available. All input fields mirror the legacy dj flags (concurrency, timeout, proxy, headers, output dir, format...).").
-		CLI(spec.CliHints{Usage: "<url>"}).
+		CLI(spec.CliHints{Usage: "<url>", Default: true}).
 		HTTP(spec.HTTPHints{Method: "POST", Path: "/scan"}).
 		MCP(spec.MCPHints{Annotations: []string{"read", "title:scan a website for JS and source maps"}}).
 		Register(reg); err != nil {
@@ -124,7 +124,11 @@ func buildArgs(args []string) ([]string, bool) {
 	}
 
 	out := make([]string, 0, len(args)+1)
-	out = append(out, "scan")
+	// 首段以 - 开头（flag 在 URL 前）时显式补 "scan"；首段是 URL 等普通词时
+	// 不补——交给 xyz-go 的默认子命令（CLI.Default）整串转发
+	if strings.HasPrefix(args[0], "-") {
+		out = append(out, "scan")
+	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--" {
