@@ -70,6 +70,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      # checkout 在 tag 触发时会用裸 commit SHA 覆写本地 tag ref，
+      # 重新拉取真正的 annotated tag，--notes-from-tag 才能读到 tag 消息
+      - name: Fetch tag annotation
+        run: git fetch --force origin "+refs/tags/${{ github.ref_name }}:refs/tags/${{ github.ref_name }}"
+
       - uses: actions/download-artifact@v4
         with:
           pattern: dj-*
