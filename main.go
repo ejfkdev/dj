@@ -17,6 +17,14 @@ import (
 
 var version = "dev" // 版本号，通过 -ldflags "-X main.version=x.x.x" 设置
 
+// scanHelpNotes 附加在 `dj scan -h` 自动帮助末尾的说明块（xyz-go CliHints.After）
+const scanHelpNotes = "说明:\n" +
+	"  - URL 是位置参数，flag 可在其前或后\n" +
+	"  - --headers 可重复，同 key 后值覆盖先值\n" +
+	"  - 环境代理 HTTPS_PROXY/HTTP_PROXY/ALL_PROXY/NO_PROXY 生效\n" +
+	"  - 兼容旧拼写：--ua → --useragent，-debug → --debug，--cache=yes/no 等\n" +
+	"  - 退出码：0 成功，1 用法或运行错误\n"
+
 func init() {
 	// 未通过 ldflags 注入版本时，回退到模块构建信息：
 	// go install github.com/ejfkdev/dj@v0.6.0 这类安装会带上标签版本，而不是 dev
@@ -131,7 +139,7 @@ func main() {
 	if _, err := spec.Define("scan", scanHandler).
 		Summary("Extract JS URLs and source maps from a website").
 		Description("Crawl a URL, discover its JS files and source maps, and restore original sources when available. All input fields mirror the legacy dj flags (concurrency, timeout, proxy, headers, output dir, format...).").
-		CLI(spec.CliHints{Usage: "<url>", Default: true}).
+		CLI(spec.CliHints{Usage: "<url>", Default: true, After: scanHelpNotes}).
 		HTTP(spec.HTTPHints{Method: "POST", Path: "/scan"}).
 		MCP(spec.MCPHints{Annotations: []string{"read", "title:scan a website for JS and source maps"}}).
 		Register(reg); err != nil {
@@ -140,7 +148,9 @@ func main() {
 	}
 
 	args, scanMode := buildArgs(os.Args[1:])
-	code := xyz.RunConfig(reg, args, xyz.Config{})
+	// Lang 固定 zh-CN：xyz-go v0.3 起界面语言默认英文（按 LANG 环境检测），
+	// 固定后 scan -h 与错误信息不受部署环境影响（--xyz.lang 仍可覆盖）
+	code := xyz.RunConfig(reg, args, xyz.Config{Lang: "zh-CN"})
 	// 旧版 dj 的用法错误退出码是 1（xyz 的 invalid_input 是 2），扫描路径统一回 1
 	if scanMode && code == 2 {
 		code = 1

@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/andybalholm/brotli v1.2.1
-	github.com/ejfkdev/xyz-go v0.2.3
+	github.com/ejfkdev/xyz-go v0.3.1
 	github.com/refraction-networking/utls v1.8.2
 	golang.org/x/net v0.53.0
 )
