@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/ejfkdev/dj/pkg/extractor"
@@ -15,6 +16,19 @@ import (
 )
 
 var version = "dev" // 版本号，通过 -ldflags "-X main.version=x.x.x" 设置
+
+func init() {
+	// 未通过 ldflags 注入版本时，回退到模块构建信息：
+	// go install github.com/ejfkdev/dj@v0.6.0 这类安装会带上标签版本，而不是 dev
+	if version != "dev" {
+		return
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		if v := bi.Main.Version; v != "" && v != "(devel)" {
+			version = v
+		}
+	}
+}
 
 // parseFormat 输出格式字符串转换为内部常量
 func parseFormat(s string) (extractor.OutputFormat, bool) {
@@ -31,14 +45,15 @@ func parseFormat(s string) (extractor.OutputFormat, bool) {
 
 // printHelp 输出帮助信息
 func printHelp() {
-	fmt.Printf("dj - JS/SourceMap Extractor %s\n", version)
-	fmt.Printf("Extract JS URLs and source maps from websites\n")
+	fmt.Printf("dj %s - JS/SourceMap Extractor\n", version)
+	fmt.Printf("Extract JS URLs and source maps from websites (via xyz-go)\n")
 	fmt.Printf("GitHub: https://github.com/ejfkdev/dj\n\n")
 	fmt.Printf("Usage:\n")
 	fmt.Printf("  dj [options] <url>        scan a website (equivalent to: dj scan [options] <url>)\n")
 	fmt.Printf("  dj scan [options] <url>   canonical subcommand form\n")
 	fmt.Printf("  dj serve [--addr :8080]   HTTP API (REST + /openapi.json + /mcp on one port)\n")
-	fmt.Printf("  dj mcp stdio|sse|http     MCP tool server (scan exposed as an MCP tool)\n\n")
+	fmt.Printf("  dj mcp stdio|sse|http     MCP tool server (scan exposed as an MCP tool)\n")
+	fmt.Printf("  dj completion <shell>     shell completion script (bash|zsh|fish)\n\n")
 	fmt.Printf("Options (apply to the scan command):\n")
 	fmt.Printf("  -v, --version            print version and exit\n")
 	fmt.Printf("  -d, --debug              enable debug output\n")
@@ -54,6 +69,17 @@ func printHelp() {
 	fmt.Printf("  -t, --timeout <secs>     per-request timeout in seconds (default: 30)\n")
 	fmt.Printf("  -c, --concurrency <N>    max concurrent HTTP requests (default: 8)\n")
 	fmt.Printf("  -h, --help               show this help\n\n")
+	fmt.Printf("xyz-go commands (serve/mcp):\n")
+	fmt.Printf("  dj serve [flags]             HTTP REST API: POST /scan, /healthz, /openapi.json, /mcp\n")
+	fmt.Printf("      --addr <host:port>       listen address (default: :8080)\n")
+	fmt.Printf("      --bearer <token>         bearer token(s), comma-separated (default: none)\n")
+	fmt.Printf("      --tls-cert <file>        TLS certificate file (use with --tls-key for HTTPS)\n")
+	fmt.Printf("      --tls-key <file>         TLS key file\n")
+	fmt.Printf("      --cors <origins>         allowed CORS origins, comma-separated\n")
+	fmt.Printf("  dj mcp stdio|sse|http [flags]\n")
+	fmt.Printf("                               MCP tool server; stdio needs no flags,\n")
+	fmt.Printf("                               sse/http take --addr, http adds --stateless\n")
+	fmt.Printf("                               (protocol 2026-07-28 without sessions)\n\n")
 	fmt.Printf("Notes:\n")
 	fmt.Printf("  - URL is the first positional argument; flags can appear before or after it\n")
 	fmt.Printf("  - Flag values can be passed as --flag=value or as the next argument\n")
@@ -61,8 +87,7 @@ func printHelp() {
 	fmt.Printf("  - --header overrides default browser headers (e.g. User-Agent, Accept)\n")
 	fmt.Printf("  - -o saves a copy of all files to the output dir (js/, html/, source_map/, sources/)\n")
 	fmt.Printf("    without the site subdirectory level; cache dir is still written normally\n")
-	fmt.Printf("  - 'dj scan -h' shows the auto-generated per-flag help; serve/mcp take --addr,\n")
-	fmt.Printf("    --bearer, --tls-cert/--tls-key, --cors and --timeout flags\n\n")
+	fmt.Printf("  - 'dj scan -h' shows the auto-generated per-flag help with defaults\n\n")
 	fmt.Printf("Examples:\n")
 	fmt.Printf("  dj https://example.com\n")
 	fmt.Printf("  dj -f md https://example.com\n")
