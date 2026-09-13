@@ -30,11 +30,11 @@
 
 ## Supported Frameworks & Loading Models
 
-dj's extractor is verified against real build output across **73 frameworks / loading models** and **562 versions**.
+dj's extractor is verified against real build output across **74 frameworks / loading models** and **572 versions**.
 
 | Category | Frameworks |
 |----------|------------|
-| Bundlers (14) | `webpack`, `webpack4`, `vite`, `rollup`, `esbuild`, `parcel`, `rsbuild`, `rspack`, `farm`, `mako`, `rolldown`, `systemjs`, `snowpack`, `turbopack` |
+| Bundlers (15) | `webpack`, `webpack4`, `vite`, `vite-plus`, `rollup`, `esbuild`, `parcel`, `rsbuild`, `rspack`, `farm`, `mako`, `rolldown`, `systemjs`, `snowpack`, `turbopack` |
 | Microfrontend frameworks (17) | `qiankun`, `single-spa`, `micro-app`, `wujie`, `garfish`, `icestark`, `piral`, `luigi`, `emp`, `hel-micro`, `native-federation`, `module-federation`, `mf-runtime`, `mf-vite`, `mf-rsbuild`, `webpack-mf`, `vite-plugin-federation` |
 | Meta frameworks / SSR (25) | `nuxt`, `sveltekit`, `angular`, `astro`, `qwik`, `solidstart`, `tanstack-start`, `marko`, `react-router`, `remix2`, `redwood`, `analog`, `vike`, `hono`, `one`, `fresh`, `stencil`, `storybook`, `gatsby`, `cra`, `umi`, `icejs`, `vue-cli`, `modernjs`, `bun` |
 | Rust / WASM frontends (3) | `leptos`, `lustre`, `trunk` |
@@ -43,24 +43,25 @@ dj's extractor is verified against real build output across **73 frameworks / lo
 
 ## Version details (click to expand)
 
-<details><summary><b>Bundlers</b> (14 — expand for verified versions)</summary>
+<details><summary><b>Bundlers</b> (15 — expand for verified versions)</summary>
 
 | Framework | Notes | Verified versions |
 |-----------|-------|-------------------|
-| **webpack** | webpack 5 runtime chunk maps | v5.0.0 ~ v5.109.2（18 个版本） |
+| **webpack** | webpack 5 runtime chunk maps | v5.0.0 ~ v5.110.3（19 个版本） |
 | **webpack4** | webpack 4 JSONP runtime | v4.33.0 ~ v4.47.0（15 个版本） |
-| **vite** | dynamic import / modulepreload / prefetch | v3.0.9 ~ v8.2.1（13 个版本） |
-| **rollup** | multi-entry + dynamic import | v2.0.6 ~ v4.62.4（18 个版本） |
+| **vite** | dynamic import / modulepreload / prefetch / .vite manifest probe | v3.0.9 ~ v8.3.0（14 个版本） |
+| **vite-plus** | Vite+ (VoidZero) `vp build` = Vite 8/Rolldown output + .vite manifest | v0.3.1（1 个版本） |
+| **rollup** | multi-entry + dynamic import | v2.0.6 ~ v4.63.2（19 个版本） |
 | **esbuild** | esbuild output | v0.14.54 ~ v0.28.2（15 个版本） |
 | **parcel** | parcel output | v2.0.1 ~ v2.16.4（4 个版本） |
-| **rsbuild** | rsbuild / rspack ecosystem | v1.0.19 ~ v1.7.6（7 个版本） |
-| **rspack** | runtime hash maps | v1.0.14 ~ v2.1.10（10 个版本） |
+| **rsbuild** | rsbuild / rspack ecosystem (2.x is rspack-based) | v1.0.19 ~ v2.2.5（10 个版本） |
+| **rspack** | runtime hash maps (2.x `rspackChunk` runtime) | v1.0.14 ~ v2.2.3（11 个版本） |
 | **farm** | Rust bundler | v0.1.1 ~ v1.0.5（5 个版本） |
 | **mako** | ByteDance mako | v0.4.17 ~ v0.11.15（8 个版本） |
-| **rolldown** | rolldown | v0.9.2 ~ v1.2.4（10 个版本） |
+| **rolldown** | rolldown | v0.9.2 ~ v1.2.8（11 个版本） |
 | **systemjs** | SystemJS output | v0.21.6 ~ v6.15.1（17 个版本） |
 | **snowpack** | unbundled ESM output | v2.18.5 ~ v3.8.8（10 个版本） |
-| **turbopack** | Next.js turbopack | v15.3.9 ~ v16.3.1（7 个版本） |
+| **turbopack** | Next.js turbopack | v15.3.9 ~ v16.3.5（8 个版本） |
 
 </details>
 

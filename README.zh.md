@@ -30,11 +30,11 @@
 
 ## 支持的框架与加载模型
 
-dj 的提取器已在 **73 类框架 / 加载模型**、**562 个实测版本**的真实构建产物上验证。
+dj 的提取器已在 **74 类框架 / 加载模型**、**572 个实测版本**的真实构建产物上验证。
 
 | 分类 | 框架 |
 |------|------|
-| 打包器（14） | `webpack`、`webpack4`、`vite`、`rollup`、`esbuild`、`parcel`、`rsbuild`、`rspack`、`farm`、`mako`、`rolldown`、`systemjs`、`snowpack`、`turbopack` |
+| 打包器（15） | `webpack`、`webpack4`、`vite`、`vite-plus`、`rollup`、`esbuild`、`parcel`、`rsbuild`、`rspack`、`farm`、`mako`、`rolldown`、`systemjs`、`snowpack`、`turbopack` |
 | 微前端框架（17） | `qiankun`、`single-spa`、`micro-app`、`wujie`、`garfish`、`icestark`、`piral`、`luigi`、`emp`、`hel-micro`、`native-federation`、`module-federation`、`mf-runtime`、`mf-vite`、`mf-rsbuild`、`webpack-mf`、`vite-plugin-federation` |
 | 元框架 / SSR（25） | `nuxt`、`sveltekit`、`angular`、`astro`、`qwik`、`solidstart`、`tanstack-start`、`marko`、`react-router`、`remix2`、`redwood`、`analog`、`vike`、`hono`、`one`、`fresh`、`stencil`、`storybook`、`gatsby`、`cra`、`umi`、`icejs`、`vue-cli`、`modernjs`、`bun` |
 | Rust / WASM 前端（3） | `leptos`、`lustre`、`trunk` |
@@ -43,24 +43,25 @@ dj 的提取器已在 **73 类框架 / 加载模型**、**562 个实测版本**�
 
 ## 版本明细（点击展开）
 
-<details><summary><b>打包器</b>（14 类，展开查看已验证版本）</summary>
+<details><summary><b>打包器</b>（15 类，展开查看已验证版本）</summary>
 
 | 框架 | 说明 | 已验证版本 |
 |------|------|------------|
-| **webpack** | webpack 5 运行时 chunk 映射 | v5.0.0 ~ v5.109.2（18 个版本） |
+| **webpack** | webpack 5 运行时 chunk 映射 | v5.0.0 ~ v5.110.3（19 个版本） |
 | **webpack4** | webpack 4 JSONP 运行时 | v4.33.0 ~ v4.47.0（15 个版本） |
-| **vite** | dynamic import / modulepreload / prefetch | v3.0.9 ~ v8.2.1（13 个版本） |
-| **rollup** | 多入口 + 动态导入 | v2.0.6 ~ v4.62.4（18 个版本） |
+| **vite** | dynamic import / modulepreload / prefetch / .vite 清单探测 | v3.0.9 ~ v8.3.0（14 个版本） |
+| **vite-plus** | Vite+（VoidZero）`vp build` = Vite 8/Rolldown 产物 + .vite 清单 | v0.3.1（1 个版本） |
+| **rollup** | 多入口 + 动态导入 | v2.0.6 ~ v4.63.2（19 个版本） |
 | **esbuild** | ESBuild 产物 | v0.14.54 ~ v0.28.2（15 个版本） |
 | **parcel** | Parcel 产物 | v2.0.1 ~ v2.16.4（4 个版本） |
-| **rsbuild** | Rsbuild / Rspack 生态 | v1.0.19 ~ v1.7.6（7 个版本） |
-| **rspack** | runtime hash 映射 | v1.0.14 ~ v2.1.10（10 个版本） |
+| **rsbuild** | Rsbuild / Rspack 生态（2.x 默认基于 Rspack） | v1.0.19 ~ v2.2.5（10 个版本） |
+| **rspack** | runtime hash 映射（2.x `rspackChunk` 运行时） | v1.0.14 ~ v2.2.3（11 个版本） |
 | **farm** | Rust 打包器 | v0.1.1 ~ v1.0.5（5 个版本） |
 | **mako** | 字节 Mako | v0.4.17 ~ v0.11.15（8 个版本） |
-| **rolldown** | Rolldown | v0.9.2 ~ v1.2.4（10 个版本） |
+| **rolldown** | Rolldown | v0.9.2 ~ v1.2.8（11 个版本） |
 | **systemjs** | SystemJS 规范产物 | v0.21.6 ~ v6.15.1（17 个版本） |
 | **snowpack** | 无打包 ESM 产物 | v2.18.5 ~ v3.8.8（10 个版本） |
-| **turbopack** | Next.js Turbopack | v15.3.9 ~ v16.3.1（7 个版本） |
+| **turbopack** | Next.js Turbopack | v15.3.9 ~ v16.3.5（8 个版本） |
 
 </details>
 

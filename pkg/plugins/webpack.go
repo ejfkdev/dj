@@ -309,6 +309,10 @@ func (p *WebpackPlugin) Precheck(ctx context.Context, input *extractor.AnalyzeIn
 		[]byte("__webpack_public_path__"),
 		[]byte("resourceBaseUrl"),
 		[]byte("webpackChunk_"),
+		// rspack 2.x 运行时全局改名（webpackChunk* → rspackChunk*），
+		// __rspack_version__/__rspack_unique_id__ 2.0 起按需注入
+		[]byte("rspackChunk"),
+		[]byte("__rspack_"),
 	}) {
 		return true
 	}
