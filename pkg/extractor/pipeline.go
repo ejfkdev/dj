@@ -1,6 +1,7 @@
 package extractor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -61,10 +62,11 @@ type Pipeline struct {
 
 	// JS 处理 WaitGroup（每个 URL 一个 goroutine，直接处理 fetch+验证+分发）
 	jsWg sync.WaitGroup
-	// source map 探测 WaitGroup：探测 goroutine 也纳入生命周期管理，
-	// 主循环判空前等待它们结束（避免退出时探测被截断导致
-	// sourceMapCount/sourceCount 抖动）
+	// source map 探测 WaitGroup：探测 goroutine 也纳入生命周期管理
 	probeWg sync.WaitGroup
+	// inflight 在飞任务数（worker + 探测）：主循环判空时据此决定是否等待，
+	// 空闲时为 0 则零等待（取代固定 500ms 盲睡；深爬站点不再每轮付等待成本）
+	inflight atomic.Int64
 
 	// 发现 JS URL 的通知 channel
 	foundCh      chan string
@@ -303,14 +305,13 @@ func (p *Pipeline) Run(ctx context.Context, startURL string) ([]string, error) {
 			hasMoreTasks := len(p.tasks) > 0 || len(p.fragments) > 0
 			p.taskMu.Unlock()
 			if !hasMoreTasks {
-				// 等待所有在飞任务结束：JS worker 会在收尾时把新发现的 URL
-				// 入队，source map 探测 goroutine 会在收尾时记录 map/还原源码。
-				// 等它们结束再判空——取代此前"盲睡 500ms 再看一次"的竞态兜底
-				// （既省掉固定 500ms 等待，也让 sourceMapCount/sourceCount 不再抖动）。
-				// 用有界等待：连接闸门偶发卡死时（http2 传输层的既有问题，
-				// 旧版靠"不等待直接退出"掩盖）不会让整次扫描挂住。
-				waitGroupBounded(&p.jsWg, 10*time.Second)
-				waitGroupBounded(&p.probeWg, 10*time.Second)
+				// 等待在飞任务结束：JS worker 会在收尾时把新发现的 URL 入队，
+				// source map 探测 goroutine 会在收尾时记录 map/还原源码。
+				// 只在真有任务在飞时才等（原子计数；通常几十毫秒就归零），
+				// 空闲时零等待——取代此前固定 500ms 的盲睡，也避免在深爬站点
+				// 每一轮判空都付出固定等待时间（真实站点实测会把整次扫描拖爆）。
+				// 病态卡死（http2 连接闸门）由内部上限兜底，不会让扫描挂住。
+				waitInflight(&p.inflight, 5*time.Second)
 
 				// 再次检查
 				p.taskMu.Lock()
@@ -333,8 +334,10 @@ func (p *Pipeline) Run(ctx context.Context, startURL string) ([]string, error) {
 		// -c/--concurrency 配置），此处直接派发任务，不再二次限流。
 		for _, urlStr := range tasks {
 			p.jsWg.Add(1)
+			p.inflight.Add(1)
 			go func(url string) {
 				defer p.jsWg.Done()
+				defer p.inflight.Add(-1)
 				p.processJSContentURL(ctx, url)
 			}(urlStr)
 		}
@@ -414,6 +417,13 @@ func (p *Pipeline) tryEnqueue(url string, discovered *DiscoveredJS) bool {
 			}
 			url = rebased
 		}
+	}
+
+	// 通配符 URL（如 CDN 前缀 + "1380-*.js" 拼接出的 .../js/1380-*.js）不是
+	// 真实文件：既不该请求，更不该计入结果（真实站点实测某站 310 个结果里
+	// 132 个是这类伪 URL，服务端对它们返回 200 text/plain 占位）。
+	if strings.Contains(url, "*") {
+		return false
 	}
 
 	// 在锁内检查，避免竞态
@@ -1227,8 +1237,10 @@ func (p *Pipeline) processFragment(ctx context.Context, discovered DiscoveredJS)
 
 		// 启动 goroutine 处理
 		p.jsWg.Add(1)
+		p.inflight.Add(1)
 		go func(url string) {
 			defer p.jsWg.Done()
+			defer p.inflight.Add(-1)
 			p.processJSContentURL(ctx, url)
 		}(normalizedURL)
 	}
@@ -1238,18 +1250,18 @@ func (p *Pipeline) processFragment(ctx context.Context, discovered DiscoveredJS)
 	}
 }
 
-// waitGroupBounded 在给定时限内等待 wg 归零。等待是常见路径（立即返回），
-// 只有底层连接卡死这种病态情况才会走到超时分支——此时放弃等待继续收尾，
-// 与旧版"不等待"的行为一致，但正常情况不再付出固定 500ms 的代价。
-func waitGroupBounded(wg *sync.WaitGroup, d time.Duration) {
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(d):
+// waitInflight 轮询等待在飞任务计数归零：计数为 0 时零开销直接返回，
+// 否则每 20ms 检查一次，最多等 d（病态卡死时可放弃等待继续收尾）。
+func waitInflight(inflight *atomic.Int64, d time.Duration) {
+	if inflight.Load() == 0 {
+		return
+	}
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if inflight.Load() == 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -1374,37 +1386,10 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 	}
 
 	// 如果 URL 以 .js/.mjs/.jsonp 结尾，但 Content-Type 是 HTML，直接跳过。
-	// 但如果内容为空（如 hm.baidu.com 返回 200 + 0 字节），说明这是真实的 JS 端点
-	// 只是返回了空内容——仍应输出 URL，不做后续插件分析。
+	// 此前对「200 + 空体」开了例外（当作真实但空的 JS 端点），实测这个例外
+	// 会把统计/追踪端点（如 hm.baidu.com 返回 200 + 0 字节）计成 JS，
+	// 一个夹具上 31 个结果里 13 个是这样的空响应，故取消该例外。
 	if contentType == ContentTypeHTML && isLikelyStaticResource(normalizedURL) {
-		if len(content) == 0 {
-			// 200 + 空体 + URL 看起来是 JS：直接加入输出（真实端点）
-			p.jsURLsMu.Lock()
-			found := false
-			for _, js := range p.jsURLs {
-				if js.URL == normalizedURL {
-					found = true
-					break
-				}
-			}
-			if !found {
-				p.jsURLs = append(p.jsURLs, DiscoveredJS{
-					URL:        normalizedURL,
-					FromURL:    discovered.FromURL,
-					FromPlugin: discovered.FromPlugin,
-					IsInline:   discovered.IsInline,
-				})
-			}
-			p.jsURLsMu.Unlock()
-			p.foundChMu.Lock()
-			if !p.foundChSeen[normalizedURL] {
-				p.foundChSeen[normalizedURL] = true
-				p.foundChMu.Unlock()
-				p.sendToFoundCh(normalizedURL)
-			} else {
-				p.foundChMu.Unlock()
-			}
-		}
 		return
 	}
 
@@ -1446,8 +1431,10 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 	// 先处理插件返回结果，收集 PrependURLs 和 PublicPaths
 	p.processResults(ctx, results, normalizedURL)
 
-	// 如果是 JS，加入 jsURLs、foundCh、knownPaths
-	if contentType == ContentTypeJS {
+	// 如果是 JS，加入 jsURLs、foundCh、knownPaths。
+	// 记入前做内容验收：排除 image/*、XML、空体、图片魔数等「只是 URL 以 .js
+	// 结尾」的响应（统计像素、错误页、占位端点），避免提取数量虚高。
+	if contentType == ContentTypeJS && isLikelyJSContent(content, headers.Get("Content-Type")) {
 		// 保存 JS 到缓存（缓存命中时幂等覆盖，内容相同）
 		p.saveJSToCache(normalizedURL, content)
 
@@ -1487,11 +1474,13 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 			p.debugLog("processJSContent: found valid JS: %s", normalizedURL)
 		}
 
-		// 探测 .map 文件（纳入 probeWg：主循环判空前会等待，避免被提前截断）
+		// 探测 .map 文件（纳入 inflight：主循环判空前只在真有在飞任务时才等待）
 		if !p.knowledge.JSHasSourceMap(normalizedURL) {
 			p.probeWg.Add(1)
+			p.inflight.Add(1)
 			go func(u string) {
 				defer p.probeWg.Done()
+				defer p.inflight.Add(-1)
 				p.probeSourceMap(u)
 			}(normalizedURL)
 		}
@@ -2061,6 +2050,79 @@ func joinURLPath(baseURL, path string) string {
 }
 
 // isLikelyStaticResource 判断 URL 是否是静态资源（.js/.css 等）
+// isLikelyJSContent 判定一个 2xx 响应体是否真的是 JS（而不是被 CDN/WAF
+// 或统计端点顶替的内容）。真实站点实测：`.js` 结尾的追踪端点会返回
+// image/gif（mmstat 1px 像素）、application/xml、或 0 字节空体，此前只要
+// URL 以 .js 结尾就计入结果，导致提取数量被虚高（某站点 117 个结果里
+// 43 个是 GIF、11 个是 XML、13 个是空响应）。
+// 保守策略：只排除「明确不是 JS」的内容，text/plain、octet-stream 等
+// 常见 JS 分发类型一律放行（由内容嗅探兜底）。
+func isLikelyJSContent(content []byte, contentTypeHeader string) bool {
+	ct := strings.ToLower(strings.TrimSpace(strings.Split(contentTypeHeader, ";")[0]))
+	switch {
+	case strings.HasPrefix(ct, "image/"),
+		strings.HasPrefix(ct, "font/"),
+		strings.HasPrefix(ct, "audio/"),
+		strings.HasPrefix(ct, "video/"),
+		strings.HasPrefix(ct, "text/css"),
+		ct == "application/xml",
+		ct == "text/xml",
+		ct == "application/xhtml+xml":
+		return false
+	}
+	body := bytes.TrimSpace(content)
+	if len(body) == 0 {
+		return false // 空响应（统计/追踪端点）不是可提取的 JS
+	}
+	// 魔数/前缀嗅探：图片与标记语言
+	if bytes.HasPrefix(body, []byte("GIF8")) ||
+		bytes.HasPrefix(body, []byte("\x89PNG")) ||
+		bytes.HasPrefix(body, []byte("\xff\xd8")) ||
+		bytes.HasPrefix(body, []byte("<?xml")) ||
+		bytes.HasPrefix(body, []byte("<!DOCTYPE")) ||
+		bytes.HasPrefix(body, []byte("<!doctype")) ||
+		bytes.HasPrefix(body, []byte("<html")) ||
+		bytes.HasPrefix(body, []byte("<HTML")) {
+		return false
+	}
+	// 明确声明是 JS 的类型：直接信任
+	switch ct {
+	case "application/javascript", "text/javascript", "application/x-javascript",
+		"application/ecmascript", "text/ecmascript", "application/node", "module":
+		return true
+	}
+	// 模糊类型（text/plain、application/octet-stream、缺失等）：必须内容像 JS。
+	// 真实站点上存在「路径前缀万能端点」（如 /api/js/<任意路径> 一律 200
+	// text/plain 返回占位内容），只看状态码和类型会把无穷多个伪 URL 计成 JS。
+	return looksLikeJSContent(body)
+}
+
+// looksLikeJSContent 用 JS 词法特征判断内容是否为脚本（只看前 8KB）。
+// 判定偏宽松：真实 JS 至少有若干关键字/标点，而占位或错误响应通常没有。
+func looksLikeJSContent(body []byte) bool {
+	head := body
+	if len(head) > 8192 {
+		head = head[:8192]
+	}
+	strong := []string{"function", "=>", "var ", "let ", "const ", "import", "export",
+		"window.", "prototype", "return ", "document.", "this.", "class "}
+	hits := 0
+	for _, m := range strong {
+		if bytes.Contains(head, []byte(m)) {
+			hits++
+			if hits >= 2 {
+				return true
+			}
+		}
+	}
+	// 单关键字但带脚本结构（分号/花括号）也算
+	if hits == 1 && (bytes.Contains(head, []byte(";")) || bytes.Contains(head, []byte("{"))) {
+		return true
+	}
+	// 无关键字：仅当同时具备分号与花括号（如 `module.exports=a={}` 这类极简产物）
+	return bytes.Contains(head, []byte(";")) && bytes.Contains(head, []byte("{"))
+}
+
 func isLikelyStaticResource(urlStr string) bool {
 	// 去掉 query string 和 fragment 再检查后缀
 	path := urlStr
