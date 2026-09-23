@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20260810T095528928Z-36026-6546b3b257f1",
+  "runId": "20260810T095528928Z-36026-6546b3b257f1",
+  "runStatus": "completed",
+  "coverage": {
+    "status": "complete",
+    "reasons": [
+      {
+        "code": "baseline_partial",
+        "stage": "baseline",
+        "target": ".",
+        "detail": "baseline capture had enumeration or snapshot errors",
+        "affectsCompletion": false
+      }
+    ]
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": "14016b1e43728c2f1d494cd71061d6216cfdda29",
+  "diffHash": "3f4e3c6faeff1542b9eec29ef0eeeb36a907afa2f6635790ec85f805eca7474e",
+  "rulesVersion": "unavailable",
+  "sessionHash": "01ecdadac39a3c5e667c3953ed22598150e59e0e797eb9d8ced4bcfc2ab23288",
+  "reportRef": ".mimosa/reports/task-review-sess_9f47ce0d-f0af-4b3e-84a0-e9e647f7d4b3-20260810T095528928Z-36026-6546b3b257f1.json",
+  "events": [],
+  "observedFindingIds": [],
+  "verifiedFiles": [
+    {
+      "file": "pkg/fetcher/fetcher.go",
+      "direct": "complete",
+      "projectContext": "partial"
+    }
+  ],
+  "recordedAt": "2026-08-10T09:55:29.128Z"
+}

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "mimosa-hook-status/v1",
+  "recordedAt": "2026-08-10T09:52:47.657Z",
+  "sessionId": "sess_9f47ce0d-f0af-4b3e-84a0-e9e647f7d4b3",
+  "event": "PostToolUse",
+  "toolName": "Write",
+  "file": "/tmp/rewrite_history.sh",
+  "outcome": "inconclusive",
+  "coverage": "partial",
+  "findingCount": 0,
+  "durationMs": 4,
+  "hostState": "hook_complete",
+  "reportHint": ".mimosa/reports/"
+}

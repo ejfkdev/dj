@@ -19,10 +19,13 @@ type URLPatternPlugin struct {
 
 // NewURLPatternPlugin 创建插件
 func NewURLPatternPlugin() *URLPatternPlugin {
-	// 匹配带引号的 //domain/path 模式
-	// 路径段中不能包含 . (排除文件扩展名)
+	// 匹配带引号的 //domain/path 模式（CDN 前缀）
+	// 主机名支持多级域名：cdn.example.com、cdn.static.example.co.uk、
+	// g.alicdn.com 都要命中——旧写法 `\.[a-zA-Z0-9]+` 之后只允许 / 开头的
+	// 路径段，多一个点就整体失配，现实中几乎所有 CDN 主机都无法匹配（等于该
+	// 通道失效；pydj/jsdj 用 [a-zA-Z0-9.-]* 修掉了）。路径段不含 . （排除文件后缀）。
 	// 引号可以是双引号、单引号或反引号
-	cdnPrefixRe := regexp.MustCompile(`["'\x60](//[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z0-9]+(?:/[a-zA-Z0-9_-]+)*/?)["'\x60]`)
+	cdnPrefixRe := regexp.MustCompile(`["'\x60](//[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z0-9]+(?:/[a-zA-Z0-9_-]+)*/?)["'\x60]`)
 	// 匹配字符串中的 .js 文件路径
 	// 支持: "xxx.js", 'xxx.js', `xxx.js`
 	// 支持: http://, https://, //, / 开头或无协议

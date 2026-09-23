@@ -20,7 +20,8 @@
 - 支持多种前端框架的 chunk 映射：Next.js、Nuxt.js、Vite、SvelteKit、Webpack 等
 - 自动发现 Source Map 并**还原原始源码**（优先 sourcesContent，缺失时用 mappings VLQ 回退）
 - **缓存复用**：第二次运行同一站点时从本地缓存恢复，零网络请求
-- TLS 指纹伪装，**随机化浏览器指纹**（Chrome、Firefox、Safari、Edge、iOS），绕过 Cloudflare 等 WAF
+- TLS 指纹伪装**默认使用固定 Chrome 画像**——TLS 指纹、User-Agent 与 `Sec-CH-*` 头来自同一个自洽的浏览器画像。WAF/CDN 站点实测：轮换指纹会被 JA3 拦截（同一站点固定 Chrome 得 476 个 JS、随机只得 11 个），轮换改为 `--random-tls` 显式开启
+- **确定性输出**：JS URL 排序输出，同一站点每次运行的 URL 集合与顺序完全一致（diff 与回归对比稳定）
 - HTTP/2 和 HTTP/1.1 协议自动协商
 - SOCKS5/HTTP/HTTPS 代理支持，支持认证
 - 环境变量代理配置（`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 等）
@@ -249,7 +250,8 @@ dj mcp http --addr 127.0.0.1:8080      # streamable HTTP（协议 2026-07-28 需
 | `-x, --proxy <URL>` | 代理地址（http/https/socks5），优先级高于环境变量 |
 | `--cookie=<cookies>` | 注入 Cookie 绕过 Cloudflare（如 `"cf_clearance=xxx"`） |
 | `-H, --header <K: V>` | 自定义 HTTP 请求头，可重复指定（curl 风格） |
-| `--no-random-tls` | 关闭随机化 TLS 指纹（使用固定 Chrome 指纹） |
+| `--random-tls` | 每次请求轮换浏览器 TLS 指纹（画像自洽：TLS + UA + Sec-CH-*）。默认是固定 Chrome 仿真 |
+| `--no-random-tls` | 兼容旧参数——现在默认即固定 Chrome |
 | `-o, --output <dir>` | 输出目录（将所有文件保存一份到此目录：js/、html/、source_map/、sources/，不含站点子目录） |
 | `-t, --timeout <secs>` | 单个 HTTP 请求超时秒数（默认 30） |
 | `-c, --concurrency <N>` | 全局 HTTP 并发上限——下载、探测、HEAD/RSC 共享同一预算（默认 8） |
@@ -298,7 +300,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 
 <details>
 <summary>📊 测试网站（点击展开）</summary>
-> 测试快照：dj v0.5.21，2026-08-21（并行重测）。数量增加的已更新；减少的站点保留历史高值（风控/网络因素）。
+> 测试快照：dj v0.6.2+，2026-09-23（默认固定 Chrome 指纹）。数量增加的已更新；减少的站点保留历史高值（风控/网络因素）。
 
 
 **框架 / 后台管理**
@@ -307,7 +309,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 |------|----|------|----|
 | [vue.ruoyi.vip](https://vue.ruoyi.vip) | 74 | [demo.1panel.cn](https://demo.1panel.cn) | 590 |
 | [show.cool-admin.com/login](https://show.cool-admin.com/login) | 135 | [ant.design](https://ant.design) | 2541 |
-| [arco.design](https://arco.design) | 461 | [vuejs.org](https://vuejs.org) | 56 |
+| [arco.design](https://arco.design) | 476 | [vuejs.org](https://vuejs.org) | 58 |
 | [react.dev](https://react.dev) | 38 | [svelte.dev](https://svelte.dev) | 189 |
 | [angular.io](https://angular.io) | 290 | [nuxt.com.cn](https://nuxt.com.cn) | 179 |
 

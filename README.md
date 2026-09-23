@@ -20,7 +20,8 @@
 - Support for multiple frontend framework chunk mappings: Next.js, Nuxt.js, Vite, SvelteKit, Webpack, and more
 - Automatic Source Map discovery and **original source code restoration** (from `sourcesContent`, with `mappings` VLQ fallback)
 - **Cache reuse**: second run on the same site restores results from local cache with zero network requests
-- TLS fingerprint spoofing with **randomized browser fingerprints** (Chrome, Firefox, Safari, Edge, iOS) to bypass Cloudflare and other WAFs
+- TLS fingerprint impersonation with **fixed Chrome profile by default** — TLS fingerprint, User-Agent and `Sec-CH-*` headers all come from one consistent browser profile. Measured on WAF/CDN sites: rotating fingerprints gets JA3-blocked (a site answering 476 JS to fixed Chrome answered 11 to rotation), so `--random-tls` is opt-in
+- **Deterministic output**: JS URLs are sorted, so the same site yields the same URL set and order on every run (stable diffs and regressions)
 - HTTP/2 and HTTP/1.1 protocol auto-negotiation
 - SOCKS5/HTTP/HTTPS proxy support with authentication
 - Environment variable proxy configuration (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, etc.)
@@ -249,7 +250,8 @@ The `scan` tool takes the same fields as the CLI flags (`url`, `concurrency`, `t
 | `-x, --proxy <URL>` | Proxy URL (http/https/socks5), overrides environment variables |
 | `--cookie=<cookies>` | Cookies for bypassing Cloudflare (e.g., `"cf_clearance=xxx"`) |
 | `-H, --header <K: V>` | Custom HTTP header, repeatable (curl-style) |
-| `--no-random-tls` | Disable randomized TLS fingerprint (use fixed Chrome) |
+| `--random-tls` | Rotate browser TLS fingerprints per request (consistent profile: TLS + UA + Sec-CH-*). Default is fixed Chrome impersonation |
+| `--no-random-tls` | Legacy compat — fixed Chrome is the default now |
 | `-o, --output <dir>` | Output directory (saves a copy of all files: js/, html/, source_map/, sources/) without site subdir |
 | `-t, --timeout <secs>` | Per-request timeout in seconds (default: 30) |
 | `-c, --concurrency <N>` | Max concurrent HTTP requests — downloads, probes, HEAD/RSC share this budget (default: 8) |
@@ -300,7 +302,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 
 <details>
 <summary>📊 Tested websites (click to expand)</summary>
-> Snapshot: dj v0.5.21, 2026-08-21 (parallel re-run). Increased counts updated; decreased sites keep previous high values (anti-bot/network).
+> Snapshot: dj v0.6.2+, 2026-09-23 (fixed-Chrome default). Increased counts updated; decreased sites keep previous high values (anti-bot/network).
 
 
 **Framework / Admin**
@@ -309,7 +311,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 |-----|----|-----|----|
 | [vue.ruoyi.vip](https://vue.ruoyi.vip) | 74 | [demo.1panel.cn](https://demo.1panel.cn) | 590 |
 | [show.cool-admin.com/login](https://show.cool-admin.com/login) | 135 | [ant.design](https://ant.design) | 2541 |
-| [arco.design](https://arco.design) | 461 | [vuejs.org](https://vuejs.org) | 56 |
+| [arco.design](https://arco.design) | 476 | [vuejs.org](https://vuejs.org) | 58 |
 | [react.dev](https://react.dev) | 38 | [svelte.dev](https://svelte.dev) | 189 |
 | [angular.io](https://angular.io) | 290 | [nuxt.com.cn](https://nuxt.com.cn) | 179 |
 

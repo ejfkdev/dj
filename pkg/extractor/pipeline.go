@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -60,6 +61,10 @@ type Pipeline struct {
 
 	// JS 处理 WaitGroup（每个 URL 一个 goroutine，直接处理 fetch+验证+分发）
 	jsWg sync.WaitGroup
+	// source map 探测 WaitGroup：探测 goroutine 也纳入生命周期管理，
+	// 主循环判空前等待它们结束（避免退出时探测被截断导致
+	// sourceMapCount/sourceCount 抖动）
+	probeWg sync.WaitGroup
 
 	// 发现 JS URL 的通知 channel
 	foundCh      chan string
@@ -298,8 +303,14 @@ func (p *Pipeline) Run(ctx context.Context, startURL string) ([]string, error) {
 			hasMoreTasks := len(p.tasks) > 0 || len(p.fragments) > 0
 			p.taskMu.Unlock()
 			if !hasMoreTasks {
-				// 等待一段时间让已启动的 goroutines 处理完并发现新任务
-				time.Sleep(500 * time.Millisecond)
+				// 等待所有在飞任务结束：JS worker 会在收尾时把新发现的 URL
+				// 入队，source map 探测 goroutine 会在收尾时记录 map/还原源码。
+				// 等它们结束再判空——取代此前"盲睡 500ms 再看一次"的竞态兜底
+				// （既省掉固定 500ms 等待，也让 sourceMapCount/sourceCount 不再抖动）。
+				// 用有界等待：连接闸门偶发卡死时（http2 传输层的既有问题，
+				// 旧版靠"不等待直接退出"掩盖）不会让整次扫描挂住。
+				waitGroupBounded(&p.jsWg, 10*time.Second)
+				waitGroupBounded(&p.probeWg, 10*time.Second)
 
 				// 再次检查
 				p.taskMu.Lock()
@@ -1227,6 +1238,21 @@ func (p *Pipeline) processFragment(ctx context.Context, discovered DiscoveredJS)
 	}
 }
 
+// waitGroupBounded 在给定时限内等待 wg 归零。等待是常见路径（立即返回），
+// 只有底层连接卡死这种病态情况才会走到超时分支——此时放弃等待继续收尾，
+// 与旧版"不等待"的行为一致，但正常情况不再付出固定 500ms 的代价。
+func waitGroupBounded(wg *sync.WaitGroup, d time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+	}
+}
+
 // processJSContentURL 处理单个 URL 的完整流程（由 goroutine 直接调用）
 func (p *Pipeline) processJSContentURL(ctx context.Context, urlStr string) {
 	// loopback 开发地址重定向（最终兜底：所有入队路径都在此汇聚，
@@ -1461,9 +1487,13 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 			p.debugLog("processJSContent: found valid JS: %s", normalizedURL)
 		}
 
-		// 探测 .map 文件
+		// 探测 .map 文件（纳入 probeWg：主循环判空前会等待，避免被提前截断）
 		if !p.knowledge.JSHasSourceMap(normalizedURL) {
-			go p.probeSourceMap(normalizedURL)
+			p.probeWg.Add(1)
+			go func(u string) {
+				defer p.probeWg.Done()
+				p.probeSourceMap(u)
+			}(normalizedURL)
 		}
 	}
 }
@@ -2166,21 +2196,9 @@ func (p *Pipeline) GetFoundCh() <-chan string {
 
 // GetOutputResult 获取格式化输出结果
 func (p *Pipeline) GetOutputResult() *OutputResult {
-	// 提取 URL 字符串列表
-	jsURLList := make([]string, 0, len(p.jsURLs))
-	for _, js := range p.jsURLs {
-		jsURLList = append(jsURLList, js.URL)
-	}
-
-	result := &OutputResult{
-		Summary: Summary{
-			JSCount:        len(p.jsURLs),
-			SourceMapCount: 0,
-		},
-		JSURLs: jsURLList,
-	}
-
-	// 来源上下文：每个 JS 的发现来源文件 + 发现插件 + 是否内联
+	// 提取来源上下文并按 URL 排序：jsURLs 此前来自 map 遍历顺序，
+	// 每次运行都可能不同（diff/回归对比噪声大）；这里统一按 URL 升序，
+	// 使同一站点多次扫描输出完全一致（jsURLs 与 jsDetails 同序）。
 	p.jsURLsMu.Lock()
 	jsDetails := make([]JSDetail, 0, len(p.jsURLs))
 	for _, js := range p.jsURLs {
@@ -2192,11 +2210,27 @@ func (p *Pipeline) GetOutputResult() *OutputResult {
 		})
 	}
 	p.jsURLsMu.Unlock()
-	result.JSDetails = jsDetails
+
+	sort.Slice(jsDetails, func(i, j int) bool { return jsDetails[i].URL < jsDetails[j].URL })
+
+	jsURLList := make([]string, 0, len(jsDetails))
+	for _, d := range jsDetails {
+		jsURLList = append(jsURLList, d.URL)
+	}
+
+	result := &OutputResult{
+		Summary: Summary{
+			JSCount:        len(jsURLList),
+			SourceMapCount: 0,
+		},
+		JSURLs:    jsURLList,
+		JSDetails: jsDetails,
+	}
 
 	p.htmlEntriesMu.Lock()
 	result.HTMLEntries = append(result.HTMLEntries, p.htmlEntries...)
 	p.htmlEntriesMu.Unlock()
+	sort.Slice(result.HTMLEntries, func(i, j int) bool { return result.HTMLEntries[i].URL < result.HTMLEntries[j].URL })
 
 	// 设置缓存目录（save-only 模式下也输出，因为文件已写入磁盘）
 	if p.cacheConfig != nil && p.cacheConfig.CanWrite() && p.baseURL != "" {

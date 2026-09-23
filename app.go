@@ -28,7 +28,8 @@ type ScanInput struct {
 	Format      string   `json:"format" desc:"输出格式：md（默认）| json | text（裸 URL 列表）" default:"md" enum:"md,json,text" cli:"shorthand=f"`
 	Cache       bool     `json:"cache" desc:"读取磁盘缓存（--no-cache 只禁读，仍会写盘）" default:"true"`
 	NoCache     bool     `json:"no-cache" desc:"禁止读取缓存（仍然保存下载产物）"`
-	NoRandomTLS bool     `json:"no-random-tls" desc:"关闭 TLS 指纹随机化（固定使用 Chrome 指纹）"`
+	NoRandomTLS bool     `json:"no-random-tls" desc:"兼容旧参数（默认即固定 Chrome 指纹，此项已无效果）"`
+	RandomTLS   bool     `json:"random-tls" desc:"每次请求随机挑选自洽浏览器画像（Chrome/Firefox/Safari/Edge/iOS）"`
 	Cookie      string   `json:"cookie" desc:"Cookie 串，用于绕过 Cloudflare 等防护（a=b; c=d）"`
 	Output      string   `json:"output" desc:"把产物额外写一份到该目录（无站点子目录层级）" cli:"shorthand=o"`
 	Headers     []string `json:"headers" desc:"自定义请求头 \"K: V\"，可重复，后值覆盖先值" cli:"shorthand=H"`
@@ -118,10 +119,13 @@ func scanHandler(ctx context.Context, in *ScanInput) (Report, error) {
 	if ua == "" {
 		ua = fetcher.DefaultUserAgent
 	}
-	fpMode := fetcher.TLSFingerprintRandom
-	if in.NoRandomTLS {
-		fpMode = fetcher.TLSFingerprintChrome
+	// 默认固定 Chrome 指纹（与请求头同源）：实测随机指纹会被 CDN/WAF 按 JA3
+	// 拦截（反爬站点上 11 个 vs 469 个 JS），--random-tls 可显式开启轮换。
+	fpMode := fetcher.TLSFingerprintChrome
+	if in.RandomTLS {
+		fpMode = fetcher.TLSFingerprintRandom
 	}
+	_ = in.NoRandomTLS // 兼容旧参数：默认已是固定 Chrome
 	pipeline.SetFetcherConfig(in.Proxy, ua, fpMode, time.Duration(in.Timeout)*time.Second)
 	pipeline.SetFetchConcurrency(in.Concurrency)
 

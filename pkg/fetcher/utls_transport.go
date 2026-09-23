@@ -41,23 +41,73 @@ func (w *utlsConnWrapper) ConnectionState() tls.ConnectionState {
 	}
 }
 
-// browserFingerprints 真实浏览器 TLS 指纹池，用于随机化 JA3/JA4 指纹。
-// 每次连接从中随机选取一个，使 TLS 指纹不固定。
-var browserFingerprints = []utls.ClientHelloID{
-	utls.HelloChrome_Auto,
-	utls.HelloFirefox_Auto,
-	utls.HelloSafari_Auto,
-	utls.HelloEdge_Auto,
-	utls.HelloIOS_Auto,
+// BrowserProfile 一个「自洽」的浏览器画像：TLS 指纹与请求头（UA / Sec-CH-*）
+// 同源。此前随机模式只随机 TLS 指纹、UA 恒为 Chrome，等于部分连接处于
+// 「TLS 说 Safari、UA 说 Chrome」的自相矛盾状态而被 CDN/WAF 识别；
+// 真实站点实测固定 Chrome 比随机多找回 10+ 个 JS 文件（svelte.dev 73→83）。
+type BrowserProfile struct {
+	Name          string
+	HelloID       utls.ClientHelloID
+	UserAgent     string
+	SecChUA       string // 空 = 非 Chromium 内核，不发送 Sec-CH-* 系列头
+	SecChPlatform string
 }
 
-// pickClientHelloID 根据指纹模式选择 ClientHelloID。
-// random 模式从浏览器指纹池中随机选取；chrome 模式固定 Chrome。
-func pickClientHelloID(mode TLSFingerprintMode) utls.ClientHelloID {
+var browserProfiles = []BrowserProfile{
+	{
+		Name:          "chrome",
+		HelloID:       utls.HelloChrome_Auto,
+		UserAgent:     DefaultUserAgent,
+		SecChUA:       chromeSecChUA,
+		SecChPlatform: `"Windows"`,
+	},
+	{
+		Name:      "firefox",
+		HelloID:   utls.HelloFirefox_Auto,
+		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0",
+	},
+	{
+		Name:      "safari",
+		HelloID:   utls.HelloSafari_Auto,
+		UserAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
+	},
+	{
+		Name:          "edge",
+		HelloID:       utls.HelloEdge_Auto,
+		UserAgent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0",
+		SecChUA:       `"Microsoft Edge";v="148", "Chromium";v="148", "Not_A Brand";v="24"`,
+		SecChPlatform: `"Windows"`,
+	},
+	{
+		Name:      "ios",
+		HelloID:   utls.HelloIOS_Auto,
+		UserAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1",
+	},
+}
+
+// ChromeProfile 固定 Chrome 画像（--no-random-tls、或用户自定义 UA 时使用）
+var ChromeProfile = browserProfiles[0]
+
+// pickProfile 按模式挑选一个自洽画像：随机模式每次请求随机选一个，
+// Chrome 模式固定 Chrome。
+func pickProfile(mode TLSFingerprintMode) BrowserProfile {
 	if mode == TLSFingerprintChrome {
-		return utls.HelloChrome_Auto
+		return ChromeProfile
 	}
-	return browserFingerprints[rand.Intn(len(browserFingerprints))]
+	return browserProfiles[rand.Intn(len(browserProfiles))]
+}
+
+// profileCtxKey 用 context 把「本次请求选定的画像」传给传输层，
+// 保证 TLS 指纹与请求头严格同源。
+type profileCtxKey struct{}
+
+func withProfile(ctx context.Context, p BrowserProfile) context.Context {
+	return context.WithValue(ctx, profileCtxKey{}, p)
+}
+
+func profileFromContext(ctx context.Context) (BrowserProfile, bool) {
+	p, ok := ctx.Value(profileCtxKey{}).(BrowserProfile)
+	return p, ok
 }
 
 // proxyFromEnvironment 从环境变量解析代理 URL
@@ -183,8 +233,12 @@ func dialUTLS(ctx context.Context, network, addr string, proxyURL *url.URL, alpn
 		host = addr
 	}
 
-	// 根据指纹模式选择 ClientHelloID（随机模式每次连接不同）
-	helloID := pickClientHelloID(fpMode)
+	// 优先使用请求 context 里选定的画像（与请求头严格同源）；
+	// 缺省回退为按模式随机/固定选择。
+	helloID := pickProfile(fpMode).HelloID
+	if prof, ok := profileFromContext(ctx); ok {
+		helloID = prof.HelloID
+	}
 	spec, err := utls.UTLSIdToSpec(helloID)
 	if err != nil {
 		rawConn.Close()
@@ -211,7 +265,12 @@ func dialUTLS(ctx context.Context, network, addr string, proxyURL *url.URL, alpn
 		return nil, fmt.Errorf("uTLS apply preset failed: %w", err)
 	}
 
-	if err := utlsConn.HandshakeContext(ctx); err != nil {
+	// 握手单独限时：TCP 拨号已有 30s 超时，但握手此前只受整请求超时约束，
+	// 卡住的握手会把 http2 传输层的连接闸门一起拖住（表现为整次扫描
+	// 6s/100s 双峰）。10s 上限足够真实站点握手，病态情况快速失败。
+	hsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := utlsConn.HandshakeContext(hsCtx); err != nil {
 		rawConn.Close()
 		return nil, fmt.Errorf("uTLS handshake failed: %w", err)
 	}

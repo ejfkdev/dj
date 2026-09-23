@@ -34,10 +34,12 @@ const chromeSecChUA = `"Chromium";v="148", "Google Chrome";v="148", "Not-A.Brand
 type TLSFingerprintMode int
 
 const (
-	// TLSFingerprintRandom 随机选择真实浏览器指纹（默认）
-	TLSFingerprintRandom TLSFingerprintMode = iota
-	// TLSFingerprintChrome 固定使用 Chrome 指纹
-	TLSFingerprintChrome
+	// TLSFingerprintChrome 固定 Chrome 指纹与配套请求头（默认）。
+	// 实测：随机指纹在 CDN/WAF 站点上会被按 JA3 拦截（真实站点 arco.design
+	// 随机得 11 个 JS、固定 Chrome 得 469 个），因此默认即 Chrome 仿真。
+	TLSFingerprintChrome TLSFingerprintMode = iota
+	// TLSFingerprintRandom 每次请求随机挑选一个自洽浏览器画像（--random-tls）
+	TLSFingerprintRandom
 )
 
 // FetcherConfig Fetcher 配置
@@ -93,8 +95,19 @@ type Fetcher struct {
 	cookieJar      http.CookieJar
 	browserHeaders bool
 	extraHeaders   map[string]string // 用户通过 --header 指定的自定义请求头
+	fpMode         TLSFingerprintMode
 	// sem 全局 HTTP 并发信号量：所有请求（下载/探测/HEAD/RSC）共享同一预算
 	sem chan struct{}
+}
+
+// pickProfile 选定本次请求使用的浏览器画像（TLS 指纹与请求头同源）。
+// 用户自定义 UA 时固定 Chrome 画像：自定义 UA 多为 Chrome 串，再随机
+// TLS 指纹会重新制造「UA 与指纹不一致」。
+func (f *Fetcher) pickProfile() BrowserProfile {
+	if f.fpMode == TLSFingerprintChrome || f.userAgent != DefaultUserAgent {
+		return ChromeProfile
+	}
+	return pickProfile(f.fpMode)
 }
 
 // NewFetcher 创建下载器（使用默认配置）
@@ -163,6 +176,7 @@ func NewFetcherWithConfig(cfg FetcherConfig) (*Fetcher, error) {
 		cookieJar:      jar,
 		browserHeaders: cfg.UseUTLS,
 		extraHeaders:   make(map[string]string),
+		fpMode:         cfg.TLSFingerprint,
 	}
 	f.SetConcurrency(8) // 默认全局并发上限
 	return f, nil
@@ -228,17 +242,26 @@ func (f *Fetcher) SetExtraHeaders(headers map[string]string) {
 	}
 }
 
-// newRequest 创建一个带默认请求头的 GET 请求
-func (f *Fetcher) newRequest(rawURL string) (*http.Request, error) {
-	req, err := http.NewRequest("GET", rawURL, nil)
+// newRequest 创建请求（GET/HEAD 共用同一浏览器画像）。
+// 画像经 context 传递给传输层，保证 TLS 指纹与请求头同源。
+func (f *Fetcher) newRequest(method, rawURL string, prof BrowserProfile) (*http.Request, error) {
+	req, err := http.NewRequest(method, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
+	req = req.WithContext(withProfile(req.Context(), prof))
+
+	// 自定义 UA 优先；未自定义时跟随画像（与 TLS 指纹一致）
+	ua := f.userAgent
+	customUA := ua != "" && ua != DefaultUserAgent
+	if ua == "" || !customUA {
+		ua = prof.UserAgent
+	}
 
 	if f.browserHeaders {
-		setBrowserHeaders(req, f.userAgent)
+		setBrowserHeaders(req, ua, prof, customUA)
 	} else {
-		req.Header.Set("User-Agent", f.userAgent)
+		req.Header.Set("User-Agent", ua)
 		req.Header.Set("Accept-Encoding", "gzip, deflate, br")
 	}
 
@@ -275,17 +298,25 @@ func isASCII(s string) bool {
 	return true
 }
 
-// setBrowserHeaders 设置完整浏览器仿真请求头，模拟 Chrome 浏览器
-func setBrowserHeaders(req *http.Request, ua string) {
+// setBrowserHeaders 设置完整浏览器仿真请求头。UA 与 Sec-CH-* 取自同一
+// 浏览器画像（与 TLS 指纹一致）：非 Chromium 画像不发 Sec-CH-* 系列，
+// 自定义 UA 时同样省略（无法判断其内核，避免制造新的不一致）。
+func setBrowserHeaders(req *http.Request, ua string, prof BrowserProfile, customUA bool) {
 	setHeaderValue(req, "User-Agent", ua)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
 	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("Pragma", "no-cache")
-	req.Header.Set("Sec-Ch-Ua", chromeSecChUA)
-	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
-	req.Header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
+	if prof.SecChUA != "" && !customUA {
+		req.Header.Set("Sec-Ch-Ua", prof.SecChUA)
+		req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+		plat := prof.SecChPlatform
+		if plat == "" {
+			plat = `"Windows"`
+		}
+		req.Header.Set("Sec-Ch-Ua-Platform", plat)
+	}
 	req.Header.Set("Sec-Fetch-Dest", "document")
 	req.Header.Set("Sec-Fetch-Mode", "navigate")
 	req.Header.Set("Sec-Fetch-Site", "none")
@@ -317,7 +348,7 @@ func (f *Fetcher) Fetch(rawURL string) ([]byte, error) {
 	// 全局 HTTP 并发预算：与探测/HEAD/RSC 等其他请求共享同一上限
 	f.acquire()
 	defer f.release()
-	req, err := f.newRequest(rawURL)
+	req, err := f.newRequest("GET", rawURL, f.pickProfile())
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +384,7 @@ func (f *Fetcher) FetchWithStatus(rawURL string) (*FetchResult, error) {
 	// 全局 HTTP 并发预算：与探测/HEAD/RSC 等其他请求共享同一上限
 	f.acquire()
 	defer f.release()
-	req, err := f.newRequest(rawURL)
+	req, err := f.newRequest("GET", rawURL, f.pickProfile())
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +432,7 @@ func (f *Fetcher) FetchWithHeaders(rawURL string, headers map[string]string) (*F
 	// 全局 HTTP 并发预算：与探测/HEAD/RSC 等其他请求共享同一上限
 	f.acquire()
 	defer f.release()
-	req, err := f.newRequest(rawURL)
+	req, err := f.newRequest("GET", rawURL, f.pickProfile())
 	if err != nil {
 		return nil, err
 	}
@@ -436,12 +467,17 @@ func (f *Fetcher) FetchWithHeaders(rawURL string, headers map[string]string) (*F
 	}, nil
 }
 
-// FetchWithStatusHead 使用 HEAD 请求探测 URL 是否存在
+// FetchWithStatusHead 使用 HEAD 请求探测 URL 是否存在。
+// 与 GET 走同一浏览器画像（此前 HEAD 用 Go 默认请求头，容易被 WAF 单独拦）。
 func (f *Fetcher) FetchWithStatusHead(rawURL string) (*FetchResult, error) {
 	// 全局 HTTP 并发预算：与探测/HEAD/RSC 等其他请求共享同一上限
 	f.acquire()
 	defer f.release()
-	resp, err := f.client.Head(rawURL)
+	req, err := f.newRequest("HEAD", rawURL, f.pickProfile())
+	if err != nil {
+		return nil, err
+	}
+	resp, err := f.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
