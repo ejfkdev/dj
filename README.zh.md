@@ -300,14 +300,14 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 
 <details>
 <summary>📊 测试网站（点击展开）</summary>
-> 测试快照：dj v0.6.2+，2026-09-23（默认固定 Chrome 指纹）。数量增加的已更新；减少的站点保留历史高值（风控/网络因素）。
+> 测试快照：dj v0.6.2+，2026-09-23（默认固定 Chrome 指纹；计入前先校验响应确为 JS）。数量增加且经内容核实的已更新；减少的站点保留历史高值（风控/网络因素）。
 
 
 **框架 / 后台管理**
 
 | 站点 | JS | 站点 | JS |
 |------|----|------|----|
-| [vue.ruoyi.vip](https://vue.ruoyi.vip) | 74 | [demo.1panel.cn](https://demo.1panel.cn) | 590 |
+| [vue.ruoyi.vip](https://vue.ruoyi.vip) | 74 | [demo.1panel.cn](https://demo.1panel.cn) | 640 |
 | [show.cool-admin.com/login](https://show.cool-admin.com/login) | 135 | [ant.design](https://ant.design) | 2541 |
 | [arco.design](https://arco.design) | 476 | [vuejs.org](https://vuejs.org) | 58 |
 | [react.dev](https://react.dev) | 38 | [svelte.dev](https://svelte.dev) | 189 |
@@ -317,7 +317,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 
 | 站点 | JS | 站点 | JS |
 |------|----|------|----|
-| [chat.deepseek.com](https://chat.deepseek.com) | 41 | [chat.z.ai](https://chat.z.ai) | 167 |
+| [chat.deepseek.com](https://chat.deepseek.com) | 41 | [chat.z.ai](https://chat.z.ai) | 204 |
 | [kimi.moonshot.cn](https://kimi.moonshot.cn) | 482 | [cloud.tencent.com](https://cloud.tencent.com) | 1532 |
 | [docs.qq.com](https://docs.qq.com) | 3617 | [www.aliyun.com](https://www.aliyun.com) | 270 |
 
@@ -325,7 +325,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 
 | 站点 | JS | 站点 | JS |
 |------|----|------|----|
-| [feishu.cn](https://www.feishu.cn) | 460 | [dingtalk.com](https://www.dingtalk.com) | 26 |
+| [feishu.cn](https://www.feishu.cn) | 460 | [dingtalk.com](https://www.dingtalk.com) | 63 |
 | [youzan.com](https://www.youzan.com) | 1254 | [kingdee.com](https://www.kingdee.com) | 165 |
 | [chanjet.com](https://www.chanjet.com) | 20 | [landray.com.cn](https://www.landray.com.cn) | 46 |
 
@@ -333,9 +333,9 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 
 | 站点 | JS | 站点 | JS |
 |------|----|------|----|
-| [gitee.com](https://gitee.com) | 260 | [baidu.com](https://www.baidu.com) | 506 |
-| [meituan.com](https://www.meituan.com) | 177 | [pinduoduo.com](https://www.pinduoduo.com) | 11 |
-| [bilibili.com](https://www.bilibili.com) | 369 | [juejin.cn](https://www.juejin.cn) | 102 |
+| [gitee.com](https://gitee.com) | 260 | [baidu.com](https://www.baidu.com) | 513 |
+| [meituan.com](https://www.meituan.com) | 180 | [pinduoduo.com](https://www.pinduoduo.com) | 11 |
+| [bilibili.com](https://www.bilibili.com) | 369 | [juejin.cn](https://www.juejin.cn) | 108 |
 
 **政务 / 高校**
 
@@ -343,7 +343,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 |------|----|------|----|
 | [shanghai.gov.cn](https://www.shanghai.gov.cn) | 131 | [xinhuanet.com](https://www.xinhuanet.com) | 92 |
 | [zju.edu.cn](https://www.zju.edu.cn) | 78 | [tsinghua.edu.cn](https://www.tsinghua.edu.cn) | 36 |
-| [chaoxing.com](https://www.chaoxing.com) | 58 | [www.people.com.cn](https://www.people.com.cn) | 80 |
+| [chaoxing.com](https://www.chaoxing.com) | 95 | [www.people.com.cn](https://www.people.com.cn) | 80 |
 
 </details>
 
