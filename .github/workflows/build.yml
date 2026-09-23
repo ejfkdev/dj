@@ -89,5 +89,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
+          # --title 固定为版本号：release 的 name 为空时，GitHub 会用正文首行
+          # （即 tag 注释首行，中文）当列表标题显示；显式给出纯版本号即可解耦
           gh release create "${{ github.ref_name }}" artifacts/* \
+            --title "${{ github.ref_name }}" \
             --notes-from-tag
