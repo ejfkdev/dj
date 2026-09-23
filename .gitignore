@@ -299,3 +299,6 @@ zsdoc/data
 # Built binary
 /dj
 
+
+# Agent harness state (plans, session notes)
+.zcode/
