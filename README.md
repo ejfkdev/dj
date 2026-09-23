@@ -321,7 +321,7 @@ dj --no-cache -o ./output -x socks5://127.0.0.1:1080 -t 60 https://example.com
 |-----|----|-----|----|
 | [chat.deepseek.com](https://chat.deepseek.com) | 41 | [chat.z.ai](https://chat.z.ai) | 204 |
 | [kimi.moonshot.cn](https://kimi.moonshot.cn) | 482 | [cloud.tencent.com](https://cloud.tencent.com) | 1532 |
-| [docs.qq.com](https://docs.qq.com) | 3617 | [www.aliyun.com](https://www.aliyun.com) | 270 |
+| [docs.qq.com](https://docs.qq.com) | 3617 | [www.aliyun.com](https://www.aliyun.com) | 432 |
 
 **Enterprise / Collaboration**
 
