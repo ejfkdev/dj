@@ -91,6 +91,16 @@ type Pipeline struct {
 	// EMP 联邦清单兜底探测只触发一次
 	empFallbackFired bool
 
+	// newDiscoveries 累计「新入队 URL」数（tryEnqueue 成功即 +1）。
+	// RSC 探测按波统计它的增量，作为该波是否产出新发现的判据。
+	newDiscoveries atomic.Int64
+
+	// RSC 探测预算：按 host 记录已派发探测数与该 host 连续无产出的探测数。
+	// 编造路由型站点（catch-all 对任意路径都回 200 + 应用外壳）会在这里止步，
+	// 真实 MPA（每个路由带来新 chunk）的产出会不断把 missStreak 清零。
+	rscMu    sync.Mutex
+	rscHosts map[string]*rscHostState
+
 	// 并发下载数上限（默认 8，CLI --concurrency 可调）
 	fetchConcurrency int
 
@@ -123,6 +133,7 @@ func NewPipeline(reg *PluginRegistry) *Pipeline {
 		urlContext:       make(map[string]DiscoveredJS),
 		restoredCount:    make(map[string]int),
 		restoredSources:  make(map[string][]string),
+		rscHosts:         make(map[string]*rscHostState),
 	}
 }
 
@@ -448,6 +459,8 @@ func (p *Pipeline) tryEnqueue(url string, discovered *DiscoveredJS) bool {
 	if p.Debug {
 		p.debugLog("tryEnqueue: %s", url)
 	}
+	// 新发现计数：RSC 探测按波比较它的增量，判断这一波是否产出（见 recordRSCYield）
+	p.newDiscoveries.Add(1)
 	return true
 }
 
@@ -1670,52 +1683,166 @@ func (p *Pipeline) processResults(ctx context.Context, results []*Result, source
 			p.processInlineResults(inlineResults, baseURL)
 		}
 
-		// 处理 RSC 探测请求（Next.js Flight 数据）
-		for _, probe := range r.RSCProbes {
-			rscKey := "rsc:" + probe.URL
-			if p.knowledge.IsSeenURL(rscKey) {
-				continue
-			}
-			p.knowledge.MarkSeenURL(rscKey)
+		// 处理 RSC 探测请求（Next.js Flight 数据）：按波并发派发，带产出预算
+		p.runRSCProbes(ctx, r.RSCProbes)
+	}
+}
 
-			if p.Debug {
-				p.debugLog("processResults: RSC probe %s", probe.URL)
-			}
+// RSC（Next.js Flight）探测的并发与预算参数。
+//
+// 探测原先在 processResults 内同步内联执行（fetch → 插件分发 → 递归
+// processResults → 下一层探测），而主循环每轮末尾 jsWg.Wait() 会连带等待这些
+// 探测链，于是同一批任务中的所有探测被迫串行：真实站点实测 112 次探测耗时 95s，
+// 占整次扫描 107s 的 89%（-c 8 时速率 1.15 次/秒，提高并发也只到 2.11 次/秒，
+// 因为并发只能重叠不同 worker 各自的探测链）。
+//
+// 现在改为按波并发派发：波内并发（并发上限仍由 Fetcher 全局信号量 =
+// --concurrency 统一管控），波间串行以便按产出决定是否继续。
+//
+// 预算部分针对「编造路由」型站点：某些站点的 catch-all 对任意路径都返回
+// 200 + 应用外壳，于是从 payload 里误认出来的路由（如一堆 commit SHA）全都
+// "探测有效"，却一个新 JS 都带不回来。实测该场景 100 次探测贡献 0 个 chunk。
+const (
+	// rscWaveSize 每波并发派发的探测数
+	rscWaveSize = 8
+	// rscMinProbesPerHost 每个 host 至少派发的探测数，避免小站点被预算误伤
+	rscMinProbesPerHost = 16
+	// rscMissBudget 同一 host 连续多少个探测无任何新入队 URL 后停止探测
+	rscMissBudget = 16
+)
 
-			fetchResult, err := p.fetcher.FetchWithHeaders(probe.URL, probe.Headers)
-			if err != nil {
-				if p.Debug {
-					p.debugLog("processResults: RSC probe error: url=%s, err=%v", probe.URL, err)
-				}
-				continue
-			}
-			if fetchResult.StatusCode < 200 || fetchResult.StatusCode >= 300 {
-				continue
-			}
+// rscHostState 单个 host 的 RSC 探测预算状态
+type rscHostState struct {
+	probes     int // 已派发探测数
+	missStreak int // 连续无产出探测数
+}
 
-			// 检测内容类型，跳过纯 HTML 响应（非 RSC 数据）
-			checkLen := len(fetchResult.Content)
-			if checkLen > 200 {
-				checkLen = 200
-			}
-			contentType := strings.ToLower(fetchResult.ContentType)
-			if strings.Contains(contentType, "text/html") && !strings.Contains(string(fetchResult.Content[:checkLen]), "I[") {
-				continue
-			}
-
-			flightInput := &AnalyzeInput{
-				SourceURL:   probe.URL,
-				ContentType: ContentTypeFlight,
-				Content:     fetchResult.Content,
-				Headers:     fetchResult.Headers,
-			}
-
-			flightResults := p.dispatchPlugins(ctx, flightInput)
-			if p.Debug {
-				p.debugLog("processResults: RSC probe %s returned %d results", probe.URL, len(flightResults))
-			}
-			p.processResults(ctx, flightResults, probe.URL)
+// runRSCProbes 并发派发 RSC 探测，并在 host 长期无产出时提前收手
+func (p *Pipeline) runRSCProbes(ctx context.Context, probes []RSCProbe) {
+	pending := make([]RSCProbe, 0, rscWaveSize)
+	flush := func() {
+		if len(pending) == 0 {
+			return
 		}
+		p.dispatchRSCWave(ctx, pending)
+		pending = pending[:0]
+	}
+
+	skipped := 0
+	for _, probe := range probes {
+		rscKey := "rsc:" + probe.URL
+		if p.knowledge.IsSeenURL(rscKey) {
+			continue
+		}
+		p.knowledge.MarkSeenURL(rscKey)
+
+		if p.rscBudgetExhausted(GetBaseURL(probe.URL)) {
+			skipped++
+			continue
+		}
+		pending = append(pending, probe)
+		if len(pending) >= rscWaveSize {
+			flush()
+		}
+	}
+	flush()
+
+	if skipped > 0 && p.Debug {
+		p.debugLog("runRSCProbes: host 探测预算用尽，跳过 %d 个探测", skipped)
+	}
+}
+
+// dispatchRSCWave 并发跑完一波探测，并按这一波的新发现数记账
+func (p *Pipeline) dispatchRSCWave(ctx context.Context, probes []RSCProbe) {
+	host := GetBaseURL(probes[0].URL)
+	before := p.newDiscoveries.Load()
+
+	var wg sync.WaitGroup
+	for _, probe := range probes {
+		wg.Add(1)
+		p.probeWg.Add(1)
+		p.inflight.Add(1)
+		go func(pr RSCProbe) {
+			defer wg.Done()
+			defer p.probeWg.Done()
+			defer p.inflight.Add(-1)
+			p.runOneRSCProbe(ctx, pr)
+		}(probe)
+	}
+	wg.Wait()
+
+	p.recordRSCYield(host, len(probes), int(p.newDiscoveries.Load()-before))
+}
+
+// runOneRSCProbe 执行单个 RSC 探测：取 flight 数据、分发插件、递归处理结果
+func (p *Pipeline) runOneRSCProbe(ctx context.Context, probe RSCProbe) {
+	if p.Debug {
+		p.debugLog("processResults: RSC probe %s", probe.URL)
+	}
+
+	fetchResult, err := p.fetcher.FetchWithHeaders(probe.URL, probe.Headers)
+	if err != nil {
+		if p.Debug {
+			p.debugLog("processResults: RSC probe error: url=%s, err=%v", probe.URL, err)
+		}
+		return
+	}
+	if fetchResult.StatusCode < 200 || fetchResult.StatusCode >= 300 {
+		return
+	}
+
+	// 检测内容类型，跳过纯 HTML 响应（非 RSC 数据）
+	checkLen := len(fetchResult.Content)
+	if checkLen > 200 {
+		checkLen = 200
+	}
+	contentType := strings.ToLower(fetchResult.ContentType)
+	if strings.Contains(contentType, "text/html") && !strings.Contains(string(fetchResult.Content[:checkLen]), "I[") {
+		return
+	}
+
+	flightInput := &AnalyzeInput{
+		SourceURL:   probe.URL,
+		ContentType: ContentTypeFlight,
+		Content:     fetchResult.Content,
+		Headers:     fetchResult.Headers,
+	}
+
+	flightResults := p.dispatchPlugins(ctx, flightInput)
+	if p.Debug {
+		p.debugLog("processResults: RSC probe %s returned %d results", probe.URL, len(flightResults))
+	}
+	p.processResults(ctx, flightResults, probe.URL)
+}
+
+// rscBudgetExhausted 判断该 host 是否已连续无产出到该收手了
+func (p *Pipeline) rscBudgetExhausted(host string) bool {
+	p.rscMu.Lock()
+	defer p.rscMu.Unlock()
+	st := p.rscHosts[host]
+	if st == nil {
+		return false
+	}
+	return st.probes >= rscMinProbesPerHost && st.missStreak >= rscMissBudget
+}
+
+// recordRSCYield 记账一波探测的产出：有新发现就清零连续无产出计数
+func (p *Pipeline) recordRSCYield(host string, probes, newURLs int) {
+	p.rscMu.Lock()
+	defer p.rscMu.Unlock()
+	st := p.rscHosts[host]
+	if st == nil {
+		st = &rscHostState{}
+		p.rscHosts[host] = st
+	}
+	st.probes += probes
+	if newURLs == 0 {
+		st.missStreak += probes
+	} else {
+		st.missStreak = 0
+	}
+	if p.Debug {
+		p.debugLog("RSC budget[%s]: probes=%d missStreak=%d newURLs=%d", host, st.probes, st.missStreak, newURLs)
 	}
 }
 
