@@ -31,11 +31,11 @@
 
 ## Supported Frameworks & Loading Models
 
-dj's extractor is verified against real build output across **74 frameworks / loading models** and **572 versions**.
+dj's extractor is verified against real build output across **78 frameworks / loading models** and **592 versions**.
 
 | Category | Frameworks |
 |----------|------------|
-| Bundlers (15) | `webpack`, `webpack4`, `vite`, `vite-plus`, `rollup`, `esbuild`, `parcel`, `rsbuild`, `rspack`, `farm`, `mako`, `rolldown`, `systemjs`, `snowpack`, `turbopack` |
+| Bundlers (19) | `webpack`, `webpack4`, `vite`, `vite-plus`, `rollup`, `esbuild`, `parcel`, `rsbuild`, `rspack`, `farm`, `mako`, `rolldown`, `systemjs`, `snowpack`, `turbopack`, `browserify`, `brunch`, `tsup`, `tsdown` |
 | Microfrontend frameworks (17) | `qiankun`, `single-spa`, `micro-app`, `wujie`, `garfish`, `icestark`, `piral`, `luigi`, `emp`, `hel-micro`, `native-federation`, `module-federation`, `mf-runtime`, `mf-vite`, `mf-rsbuild`, `webpack-mf`, `vite-plugin-federation` |
 | Meta frameworks / SSR (25) | `nuxt`, `sveltekit`, `angular`, `astro`, `qwik`, `solidstart`, `tanstack-start`, `marko`, `react-router`, `remix2`, `redwood`, `analog`, `vike`, `hono`, `one`, `fresh`, `stencil`, `storybook`, `gatsby`, `cra`, `umi`, `icejs`, `vue-cli`, `modernjs`, `bun` |
 | Rust / WASM frontends (3) | `leptos`, `lustre`, `trunk` |
@@ -44,25 +44,29 @@ dj's extractor is verified against real build output across **74 frameworks / lo
 
 ## Version details (click to expand)
 
-<details><summary><b>Bundlers</b> (15 — expand for verified versions)</summary>
+<details><summary><b>Bundlers</b> (19 — expand for verified versions)</summary>
 
 | Framework | Notes | Verified versions |
 |-----------|-------|-------------------|
-| **webpack** | webpack 5 runtime chunk maps | v5.0.0 ~ v5.110.3（19 个版本） |
+| **webpack** | webpack 5 runtime chunk maps | v5.0.0 ~ v5.113.0（20 个版本） |
 | **webpack4** | webpack 4 JSONP runtime | v4.33.0 ~ v4.47.0（15 个版本） |
-| **vite** | dynamic import / modulepreload / prefetch / .vite manifest probe | v3.0.9 ~ v8.3.0（14 个版本） |
-| **vite-plus** | Vite+ (VoidZero) `vp build` = Vite 8/Rolldown output + .vite manifest | v0.3.1（1 个版本） |
+| **vite** | dynamic import / modulepreload / prefetch / .vite manifest probe | v3.0.9 ~ v8.3.8（15 个版本） |
+| **vite-plus** | Vite+ (VoidZero) `vp build` = Vite 8/Rolldown output + .vite manifest | v0.3.1 ~ v1.7.0（2 个版本） |
 | **rollup** | multi-entry + dynamic import | v2.0.6 ~ v4.63.2（19 个版本） |
 | **esbuild** | esbuild output | v0.14.54 ~ v0.28.2（15 个版本） |
 | **parcel** | parcel output | v2.0.1 ~ v2.16.4（4 个版本） |
-| **rsbuild** | rsbuild / rspack ecosystem (2.x is rspack-based) | v1.0.19 ~ v2.2.5（10 个版本） |
-| **rspack** | runtime hash maps (2.x `rspackChunk` runtime) | v1.0.14 ~ v2.2.3（11 个版本） |
+| **rsbuild** | rsbuild / rspack ecosystem (2.x is rspack-based) | v1.0.19 ~ v2.3.3（11 个版本） |
+| **rspack** | runtime hash maps (2.x `rspackChunk` runtime) | v1.0.14 ~ v2.3.3（12 个版本） |
 | **farm** | Rust bundler | v0.1.1 ~ v1.0.5（5 个版本） |
 | **mako** | ByteDance mako | v0.4.17 ~ v0.11.15（8 个版本） |
-| **rolldown** | rolldown | v0.9.2 ~ v1.2.8（11 个版本） |
+| **rolldown** | rolldown | v0.9.2 ~ v1.3.3（12 个版本） |
 | **systemjs** | SystemJS output | v0.21.6 ~ v6.15.1（17 个版本） |
 | **snowpack** | unbundled ESM output | v2.18.5 ~ v3.8.8（10 个版本） |
-| **turbopack** | Next.js turbopack | v15.3.9 ~ v16.3.5（8 个版本） |
+| **turbopack** | Next.js turbopack | v15.3.9 ~ v16.4.6（9 个版本） |
+| **browserify** | CommonJS bundles + runtime-injected scripts | v17.0.1（1 个版本） |
+| **brunch** | joinTo bundles (2.x is the real bundler; npm 3.x–5.x is an unrelated app) | v2.10.17（1 个版本） |
+| **tsup** | esbuild library bundler with ESM splitting | v9.0.0（1 个版本） |
+| **tsdown** | rolldown library bundler | v0.23.7（1 个版本） |
 
 </details>
 
@@ -81,10 +85,10 @@ dj's extractor is verified against real build output across **74 frameworks / lo
 | **emp** | @efox/emp | v1.0.34 ~ v1.10.2（11 个版本） |
 | **hel-micro** | hel-micro | v3.5.16 ~ v4.15.3（10 个版本） |
 | **native-federation** | native federation | v0.9.1 ~ v4.4.1（11 个版本） |
-| **module-federation** | @module-federation/enhanced | v0.0.17 ~ v2.8.2（11 个版本） |
-| **mf-runtime** | MF runtime only | v2.1.0 ~ v2.8.2（8 个版本） |
-| **mf-vite** | MF vite integration | v1.13.7 ~ v1.20.7（8 个版本） |
-| **mf-rsbuild** | MF rsbuild plugin | v2.1.0 ~ v2.8.2（8 个版本） |
+| **module-federation** | @module-federation/enhanced | v0.0.17 ~ v2.9.3（12 个版本） |
+| **mf-runtime** | MF runtime only | v2.1.0 ~ v2.9.3（9 个版本） |
+| **mf-vite** | MF vite integration | v1.13.7 ~ v1.24.1（9 个版本） |
+| **mf-rsbuild** | MF rsbuild plugin | v2.1.0 ~ v2.9.3（9 个版本） |
 | **webpack-mf** | webpack built-in MF | v5.98.0 ~ v5.108.4（10 个版本） |
 | **vite-plugin-federation** | Origin.js federation | v0.0.3 ~ v1.4.1（6 个版本） |
 
@@ -94,30 +98,30 @@ dj's extractor is verified against real build output across **74 frameworks / lo
 
 | Framework | Notes | Verified versions |
 |-----------|-------|-------------------|
-| **nuxt** | Nuxt | v3.0.0 ~ v4.5.2（8 个版本） |
+| **nuxt** | Nuxt | v3.0.0 ~ v4.6.4（9 个版本） |
 | **sveltekit** | SvelteKit | v2.0.8 ~ v2.70.2（10 个版本） |
-| **angular** | Angular | v17.0.10 ~ v20.3.34（10 个版本） |
+| **angular** | Angular | v17.0.10 ~ v22.3.0（11 个版本） |
 | **astro** | Astro | v3.6.5 ~ v7.2.2（4 个版本） |
 | **qwik** | Qwik | v1.9.1 ~ v1.20.0（12 个版本） |
 | **solidstart** | SolidStart | v1.1.7 ~ v2.0.0（4 个版本） |
 | **tanstack-start** | TanStack Start | v1.111.15 ~ v1.168.46（8 个版本） |
 | **marko** | Marko | v0.1.16 ~ v0.11.9（5 个版本） |
-| **react-router** | React Router framework mode | v7.0.2 ~ v8.3.0（8 个版本） |
+| **react-router** | React Router framework mode | v7.0.2 ~ v8.5.2（9 个版本） |
 | **remix2** | Remix | v2.10.3 ~ v2.17.5（8 个版本） |
 | **redwood** | Redwood | v6.6.4 ~ v8.9.0（3 个版本） |
 | **analog** | Analog | v0.2.45 ~ v2.7.0（4 个版本） |
 | **vike** | Vike | v0.4.249 ~ v0.4.260（12 个版本） |
-| **hono** | Hono JSX | v4.2.9 ~ v4.13.2（12 个版本） |
+| **hono** | Hono JSX | v4.2.9 ~ v4.13.20（13 个版本） |
 | **one** | One | v1.17.11 ~ v1.24.5（8 个版本） |
 | **fresh** | Deno Fresh | v1.4.3 ~ v2.3.3（7 个版本） |
 | **stencil** | Stencil | v4.33.1 ~ v4.44.0（12 个版本） |
-| **storybook** | Storybook static export | v9.0.18 ~ v10.5.9（8 个版本） |
+| **storybook** | Storybook static export | v9.0.18 ~ v10.6.8（9 个版本） |
 | **gatsby** | Gatsby | v4.25.9 ~ v5.16.1（5 个版本） |
 | **cra** | Create React App | v5.0.0 ~ v5.0.1（2 个版本） |
 | **umi** | UmiJS 4 | v4.0.90 ~ v4.7.6（8 个版本） |
 | **icejs** | ICE.js | v3.0.6 ~ v3.6.5（7 个版本） |
 | **vue-cli** | Vue CLI | v4.0.5 ~ v5.0.9（7 个版本） |
-| **modernjs** | Modern.js | v2.0.2 ~ v3.8.2（11 个版本） |
+| **modernjs** | Modern.js | v2.0.2 ~ v3.12.0（12 个版本） |
 | **bun** | Bun bundler | v0.6.14 ~ v1.3.14（7 个版本） |
 
 </details>
