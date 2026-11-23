@@ -31,7 +31,7 @@
 
 ## 支持的框架与加载模型
 
-dj 的提取器已在 **78 类框架 / 加载模型**、**592 个实测版本**的真实构建产物上验证。
+dj 的提取器已在 **78 类框架 / 加载模型**、**597 个实测版本**的真实构建产物上验证。
 
 | 分类 | 框架 |
 |------|------|
@@ -52,7 +52,7 @@ dj 的提取器已在 **78 类框架 / 加载模型**、**592 个实测版本**�
 | **webpack4** | webpack 4 JSONP 运行时 | v4.33.0 ~ v4.47.0（15 个版本） |
 | **vite** | dynamic import / modulepreload / prefetch / .vite 清单探测 | v3.0.9 ~ v8.3.8（15 个版本） |
 | **vite-plus** | Vite+（VoidZero）`vp build` = Vite 8/Rolldown 产物 + .vite 清单 | v0.3.1 ~ v1.7.0（2 个版本） |
-| **rollup** | 多入口 + 动态导入 | v2.0.6 ~ v4.63.2（19 个版本） |
+| **rollup** | 多入口 + 动态导入 | v2.0.6 ~ v4.68.8（20 个版本） |
 | **esbuild** | ESBuild 产物 | v0.14.54 ~ v0.28.2（15 个版本） |
 | **parcel** | Parcel 产物 | v2.0.1 ~ v2.16.4（4 个版本） |
 | **rsbuild** | Rsbuild / Rspack 生态（2.x 默认基于 Rspack） | v1.0.19 ~ v2.3.3（11 个版本） |
@@ -101,7 +101,7 @@ dj 的提取器已在 **78 类框架 / 加载模型**、**592 个实测版本**�
 | **nuxt** | Nuxt | v3.0.0 ~ v4.6.4（9 个版本） |
 | **sveltekit** | SvelteKit | v2.0.8 ~ v2.70.2（10 个版本） |
 | **angular** | Angular | v17.0.10 ~ v22.3.0（11 个版本） |
-| **astro** | Astro | v3.6.5 ~ v7.2.2（4 个版本） |
+| **astro** | Astro | v3.6.5 ~ v7.4.13（5 个版本） |
 | **qwik** | Qwik | v1.9.1 ~ v1.20.0（12 个版本） |
 | **solidstart** | SolidStart | v1.1.7 ~ v2.0.0（4 个版本） |
 | **tanstack-start** | TanStack Start | v1.111.15 ~ v1.168.46（8 个版本） |
@@ -110,15 +110,15 @@ dj 的提取器已在 **78 类框架 / 加载模型**、**592 个实测版本**�
 | **remix2** | Remix | v2.10.3 ~ v2.17.5（8 个版本） |
 | **redwood** | Redwood | v6.6.4 ~ v8.9.0（3 个版本） |
 | **analog** | Analog | v0.2.45 ~ v2.7.0（4 个版本） |
-| **vike** | Vike | v0.4.249 ~ v0.4.260（12 个版本） |
+| **vike** | Vike | v0.4.249 ~ v0.4.270（13 个版本） |
 | **hono** | Hono JSX | v4.2.9 ~ v4.13.20（13 个版本） |
 | **one** | One | v1.17.11 ~ v1.24.5（8 个版本） |
 | **fresh** | Deno Fresh | v1.4.3 ~ v2.3.3（7 个版本） |
-| **stencil** | Stencil | v4.33.1 ~ v4.44.0（12 个版本） |
+| **stencil** | Stencil | v4.33.1 ~ v4.45.5（13 个版本） |
 | **storybook** | Storybook 静态导出 | v9.0.18 ~ v10.6.8（9 个版本） |
 | **gatsby** | Gatsby | v4.25.9 ~ v5.16.1（5 个版本） |
 | **cra** | Create React App | v5.0.0 ~ v5.0.1（2 个版本） |
-| **umi** | UmiJS 4 | v4.0.90 ~ v4.7.6（8 个版本） |
+| **umi** | UmiJS 4 | v4.0.90 ~ v4.7.37（9 个版本） |
 | **icejs** | ICE.js | v3.0.6 ~ v3.6.5（7 个版本） |
 | **vue-cli** | Vue CLI | v4.0.5 ~ v5.0.9（7 个版本） |
 | **modernjs** | Modern.js | v2.0.2 ~ v3.12.0（12 个版本） |

@@ -31,7 +31,7 @@
 
 ## Supported Frameworks & Loading Models
 
-dj's extractor is verified against real build output across **78 frameworks / loading models** and **592 versions**.
+dj's extractor is verified against real build output across **78 frameworks / loading models** and **597 versions**.
 
 | Category | Frameworks |
 |----------|------------|
@@ -52,7 +52,7 @@ dj's extractor is verified against real build output across **78 frameworks / lo
 | **webpack4** | webpack 4 JSONP runtime | v4.33.0 ~ v4.47.0（15 个版本） |
 | **vite** | dynamic import / modulepreload / prefetch / .vite manifest probe | v3.0.9 ~ v8.3.8（15 个版本） |
 | **vite-plus** | Vite+ (VoidZero) `vp build` = Vite 8/Rolldown output + .vite manifest | v0.3.1 ~ v1.7.0（2 个版本） |
-| **rollup** | multi-entry + dynamic import | v2.0.6 ~ v4.63.2（19 个版本） |
+| **rollup** | multi-entry + dynamic import | v2.0.6 ~ v4.68.8（20 个版本） |
 | **esbuild** | esbuild output | v0.14.54 ~ v0.28.2（15 个版本） |
 | **parcel** | parcel output | v2.0.1 ~ v2.16.4（4 个版本） |
 | **rsbuild** | rsbuild / rspack ecosystem (2.x is rspack-based) | v1.0.19 ~ v2.3.3（11 个版本） |
@@ -101,7 +101,7 @@ dj's extractor is verified against real build output across **78 frameworks / lo
 | **nuxt** | Nuxt | v3.0.0 ~ v4.6.4（9 个版本） |
 | **sveltekit** | SvelteKit | v2.0.8 ~ v2.70.2（10 个版本） |
 | **angular** | Angular | v17.0.10 ~ v22.3.0（11 个版本） |
-| **astro** | Astro | v3.6.5 ~ v7.2.2（4 个版本） |
+| **astro** | Astro | v3.6.5 ~ v7.4.13（5 个版本） |
 | **qwik** | Qwik | v1.9.1 ~ v1.20.0（12 个版本） |
 | **solidstart** | SolidStart | v1.1.7 ~ v2.0.0（4 个版本） |
 | **tanstack-start** | TanStack Start | v1.111.15 ~ v1.168.46（8 个版本） |
@@ -110,15 +110,15 @@ dj's extractor is verified against real build output across **78 frameworks / lo
 | **remix2** | Remix | v2.10.3 ~ v2.17.5（8 个版本） |
 | **redwood** | Redwood | v6.6.4 ~ v8.9.0（3 个版本） |
 | **analog** | Analog | v0.2.45 ~ v2.7.0（4 个版本） |
-| **vike** | Vike | v0.4.249 ~ v0.4.260（12 个版本） |
+| **vike** | Vike | v0.4.249 ~ v0.4.270（13 个版本） |
 | **hono** | Hono JSX | v4.2.9 ~ v4.13.20（13 个版本） |
 | **one** | One | v1.17.11 ~ v1.24.5（8 个版本） |
 | **fresh** | Deno Fresh | v1.4.3 ~ v2.3.3（7 个版本） |
-| **stencil** | Stencil | v4.33.1 ~ v4.44.0（12 个版本） |
+| **stencil** | Stencil | v4.33.1 ~ v4.45.5（13 个版本） |
 | **storybook** | Storybook static export | v9.0.18 ~ v10.6.8（9 个版本） |
 | **gatsby** | Gatsby | v4.25.9 ~ v5.16.1（5 个版本） |
 | **cra** | Create React App | v5.0.0 ~ v5.0.1（2 个版本） |
-| **umi** | UmiJS 4 | v4.0.90 ~ v4.7.6（8 个版本） |
+| **umi** | UmiJS 4 | v4.0.90 ~ v4.7.37（9 个版本） |
 | **icejs** | ICE.js | v3.0.6 ~ v3.6.5（7 个版本） |
 | **vue-cli** | Vue CLI | v4.0.5 ~ v5.0.9（7 个版本） |
 | **modernjs** | Modern.js | v2.0.2 ~ v3.12.0（12 个版本） |
