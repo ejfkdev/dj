@@ -23,6 +23,8 @@ const scanHelpNotes = "说明:\n" +
 	"  - --headers 可重复，同 key 后值覆盖先值\n" +
 	"  - 环境代理 HTTPS_PROXY/HTTP_PROXY/ALL_PROXY/NO_PROXY 生效\n" +
 	"  - 兼容旧拼写：--ua → --useragent，-debug → --debug，--cache=yes/no 等\n" +
+	"  - 输出格式由 -f/--format 决定（md|json|text）；全局 --format/--json 是\n" +
+	"    xyz-go 渲染层覆盖，通常无需使用\n" +
 	"  - 退出码：0 成功，1 用法或运行错误\n"
 
 func init() {
@@ -83,7 +85,8 @@ func printHelp() {
 	fmt.Printf("      --ua <UA>            short alias for --useragent\n")
 	fmt.Printf("  -x, --proxy <URL>        proxy URL: http://, https://, socks5://\n")
 	fmt.Printf("      --cookie <cookies>   cookies for bypassing Cloudflare\n")
-	fmt.Printf("  -H, --header <K: V>      custom HTTP header, repeatable (curl-style, non-ASCII supported)\n")
+	fmt.Printf("  -H, --headers <K: V>     custom HTTP header, repeatable (curl-style, non-ASCII supported;\n")
+	fmt.Printf("                           --header is accepted as an alias)\n")
 	fmt.Printf("      --random-tls         rotate browser TLS fingerprints per request (default: fixed Chrome)\n")
 	fmt.Printf("      --no-random-tls      legacy compat: fixed Chrome is the default now\n")
 	fmt.Printf("  -o, --output <dir>       output directory (saves a copy without site subdir)\n")
@@ -106,12 +109,14 @@ func printHelp() {
 	fmt.Printf("Notes:\n")
 	fmt.Printf("  - URL is the first positional argument; flags can appear before or after it\n")
 	fmt.Printf("  - Flag values can be passed as --flag=value or as the next argument\n")
-	fmt.Printf("  - --header can be specified multiple times; later values override earlier ones\n")
-	fmt.Printf("  - --header overrides default browser headers (e.g. User-Agent, Accept)\n")
+	fmt.Printf("  - --headers can be specified multiple times; later values override earlier ones\n")
+	fmt.Printf("  - --headers overrides default browser headers (e.g. User-Agent, Accept)\n")
 	fmt.Printf("  - environment proxies are honored: HTTPS_PROXY, HTTP_PROXY, ALL_PROXY, NO_PROXY\n")
 	fmt.Printf("  - -o saves a copy of all files to the output dir (js/, html/, source_map/, sources/)\n")
 	fmt.Printf("    without the site subdirectory level; cache dir is still written normally\n")
 	fmt.Printf("  - 'dj scan -h' shows the auto-generated per-flag help with defaults\n")
+	fmt.Printf("  - output format is controlled by -f/--format (md|json|text); the global\n")
+	fmt.Printf("    --format/--json flags are xyz-go renderer overrides, rarely needed\n")
 	fmt.Printf("  - exit codes: 0 success, 1 usage or runtime error\n")
 	fmt.Printf("\n")
 	fmt.Printf("Examples:\n")
@@ -151,7 +156,19 @@ func main() {
 	args, scanMode := buildArgs(os.Args[1:])
 	// Lang 固定 zh-CN：xyz-go v0.3 起界面语言默认英文（按 LANG 环境检测），
 	// 固定后 scan -h 与错误信息不受部署环境影响（--xyz.lang 仍可覆盖）
-	code := xyz.RunConfig(reg, args, xyz.Config{Lang: "zh-CN"})
+	//
+	// FormatInteractive/FormatPiped 钉成 text：xyz-go 0.4 起全局 --format 默认
+	// auto，管道下会解析成 jsonl，把 scan 返回的 Report 字符串包成一行 JSON，
+	// 破坏 dj「-f md/json/text 逐字节稳定」的输出契约（harness 与脚本都直接
+	// 解析 stdout）。text 在两种上下文都原样打印字符串；--json / --xyz.format
+	// 仍可作为显式覆盖。
+	code := xyz.RunConfig(reg, args, xyz.Config{
+		Lang:              "zh-CN",
+		FormatInteractive: "text",
+		FormatPiped:       "text",
+		Name:              "dj",
+		Version:           version,
+	})
 	// 旧版 dj 的用法错误退出码是 1（xyz 的 invalid_input 是 2），扫描路径统一回 1
 	if scanMode && code == 2 {
 		code = 1
@@ -172,6 +189,22 @@ func buildArgs(args []string) ([]string, bool) {
 	}
 	switch args[0] {
 	case "serve", "mcp", "completion":
+		// 这几个子命令不认单横杠 -h：serve 会忽略它直接起服务、mcp 报
+		// "flag needs an argument: --h"。统一归一成 --help（xyz 认双横杠）。
+		for i, a := range args {
+			if a == "-h" {
+				args[i] = "--help"
+			}
+		}
+		// completion 把 --help 当 shell 名报错，这里直接给用法
+		if args[0] == "completion" {
+			for _, a := range args[1:] {
+				if a == "--help" || a == "help" {
+					fmt.Println("usage: dj completion <bash|zsh|fish>")
+					os.Exit(0)
+				}
+			}
+		}
 		return args, false
 	case "scan":
 		return args, true
@@ -203,6 +236,11 @@ func buildArgs(args []string) ([]string, bool) {
 			out = append(out, "--useragent")
 		case strings.HasPrefix(a, "--ua="):
 			out = append(out, "--useragent="+strings.TrimPrefix(a, "--ua="))
+		case a == "--header":
+			// 文档/旧版拼写是单数 --header，注册名是 --headers，两者都收
+			out = append(out, "--headers")
+		case strings.HasPrefix(a, "--header="):
+			out = append(out, "--headers="+strings.TrimPrefix(a, "--header="))
 		case a == "-debug":
 			out = append(out, "--debug")
 		case a == "--cache":

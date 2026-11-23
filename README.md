@@ -253,7 +253,7 @@ The `scan` tool takes the same fields as the CLI flags (`url`, `concurrency`, `t
 | `--ua=<UA>` | Short alias for `--useragent` |
 | `-x, --proxy <URL>` | Proxy URL (http/https/socks5), overrides environment variables |
 | `--cookie=<cookies>` | Cookies for bypassing Cloudflare (e.g., `"cf_clearance=xxx"`) |
-| `-H, --header <K: V>` | Custom HTTP header, repeatable (curl-style) |
+| `-H, --headers <K: V>` | Custom HTTP header, repeatable (curl-style); `--header` accepted as alias |
 | `--random-tls` | Rotate browser TLS fingerprints per request (consistent profile: TLS + UA + Sec-CH-*). Default is fixed Chrome impersonation |
 | `--no-random-tls` | Legacy compat — fixed Chrome is the default now |
 | `-o, --output <dir>` | Output directory (saves a copy of all files: js/, html/, source_map/, sources/) without site subdir |

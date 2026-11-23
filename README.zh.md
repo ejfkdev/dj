@@ -253,7 +253,7 @@ dj mcp http --addr 127.0.0.1:8080      # streamable HTTP（协议 2026-07-28 需
 | `--ua=<UA>` | `--useragent` 的短别名 |
 | `-x, --proxy <URL>` | 代理地址（http/https/socks5），优先级高于环境变量 |
 | `--cookie=<cookies>` | 注入 Cookie 绕过 Cloudflare（如 `"cf_clearance=xxx"`） |
-| `-H, --header <K: V>` | 自定义 HTTP 请求头，可重复指定（curl 风格） |
+| `-H, --headers <K: V>` | 自定义 HTTP 请求头，可重复指定（curl 风格）；兼容别名 `--header` |
 | `--random-tls` | 每次请求轮换浏览器 TLS 指纹（画像自洽：TLS + UA + Sec-CH-*）。默认是固定 Chrome 仿真 |
 | `--no-random-tls` | 兼容旧参数——现在默认即固定 Chrome |
 | `-o, --output <dir>` | 输出目录（将所有文件保存一份到此目录：js/、html/、source_map/、sources/，不含站点子目录） |

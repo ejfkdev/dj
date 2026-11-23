@@ -1500,48 +1500,6 @@ func (p *Pipeline) processJSContent(ctx context.Context, discovered DiscoveredJS
 	}
 }
 
-// recordUnreachableJS 在 JS URL 无法下载（非 2xx 或网络错误）时，
-// 仍将其加入 jsURLs 和 foundCh 输出。用户应知道该 JS URL 的存在，
-// 即使服务器拒绝访问（如反爬 418、403 等）。
-func (p *Pipeline) recordUnreachableJS(url string, discovered DiscoveredJS) {
-	// 只对看起来是 JS 的 URL 输出（避免 HTML 页面的误报）
-	if !isLikelyStaticResource(url) {
-		return
-	}
-
-	p.jsURLsMu.Lock()
-	found := false
-	for _, js := range p.jsURLs {
-		if js.URL == url {
-			found = true
-			break
-		}
-	}
-	if !found {
-		p.jsURLs = append(p.jsURLs, DiscoveredJS{
-			URL:        url,
-			FromURL:    discovered.FromURL,
-			FromPlugin: discovered.FromPlugin,
-			IsInline:   discovered.IsInline,
-		})
-	}
-	p.jsURLsMu.Unlock()
-
-	// 发送到 foundCh（使用安全方法，防止 send on closed channel）
-	p.foundChMu.Lock()
-	if !p.foundChSeen[url] {
-		p.foundChSeen[url] = true
-		p.foundChMu.Unlock()
-		p.sendToFoundCh(url)
-	} else {
-		p.foundChMu.Unlock()
-	}
-
-	if p.Debug {
-		p.debugLog("recordUnreachableJS: %s (unreachable but recorded)", url)
-	}
-}
-
 // dispatchPlugins 分发插件分析
 func (p *Pipeline) dispatchPlugins(ctx context.Context, input *AnalyzeInput) []*Result {
 	if p.Debug {

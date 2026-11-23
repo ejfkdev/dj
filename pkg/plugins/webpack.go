@@ -13,7 +13,6 @@ import (
 // WebpackPlugin 提取 Webpack 相关的动态加载
 type WebpackPlugin struct {
 	// 检测特征
-	webpackMarkerRe *regexp.Regexp
 	// publicPath 提取 - 通用模式，不依赖变量名
 	// 匹配: X.p="..." 或 X.p="..."+... 形式
 	publicPathRe *regexp.Regexp
@@ -24,9 +23,7 @@ type WebpackPlugin struct {
 	// 箭头函数格式: X.u=Y=>"prefix/"+Y+"-"+{...}[Y]+".suffix"
 	lTypeRe *regexp.Regexp
 	// 通用 webpack runtime chunk URL 函数: X.u=function(e){...{id:hash}[e]...}
-	webpackRuntimeChunkUrlRe *regexp.Regexp
 	// webpackChunk_xxx 全局变量注册
-	webpackChunkRe *regexp.Regexp
 	// 从 push([[id], {...}]) 提取 chunk ID
 	chunkPushRe *regexp.Regexp
 	// 数字 hash 映射表提取: {10:"ce0ccf4f",209:"d48a70eb",...}
@@ -34,7 +31,6 @@ type WebpackPlugin struct {
 	// 箭头函数 chunk 路径前缀提取: l.u=e=>"js/"+e+"-"+...+".js"
 	arrowFunctionPathPrefixRe *regexp.Regexp
 	// rspack/webpack runtime hash mapping: {1124:"hash",...} (数字开头)
-	rspackHashMapRe *regexp.Regexp
 	// webpackChunk_xxx.push([[id], {...}]) 格式的 chunk 内部注册
 	// 匹配: webpackChunk_tencent_docs.push([[449],{85449:function...}])
 	webpackChunkSelfRegRe *regexp.Regexp
@@ -44,7 +40,6 @@ type WebpackPlugin struct {
 	// webpack chunk URL 构造函数: u.u=function(t){return t+".{hash}.js"}
 	webpackChunkURLBuilderRe *regexp.Regexp
 	// Webpack 5 chunk URL 函数: function(e){return""+e+"."+{id:hash}[e]+".js"}
-	webpackChunkURLBuilderV5Re *regexp.Regexp
 	// 匹配 Webpack chunk 动态加载调用: .e(449) 或 .e(449).then(...)
 	webpackChunkLoadCallRe *regexp.Regexp
 	// 匹配字符串 chunk ID 的动态加载: xxx("chunk-xxx") 或 xxx("chunk-xxx").then(...)
@@ -57,7 +52,6 @@ type WebpackPlugin struct {
 	// 备用路径前缀正则（用于 X.p+"path/" 格式）
 	webpackPathPrefixAltRe *regexp.Regexp
 	// 通用 publicPath 赋值: X.p="..." (任意变量名)
-	webpackPublicPathAssignRe *regexp.Regexp
 	// webpack runtime 中 "prefix" + e + "-" + {...}[e] + ".suffix" 模式
 	webpackChunkMapPatternRe *regexp.Regexp
 	// h.u=e=>"prefix/"+((nameMap)[e]||e)+"."+(hashMap)[e]+".js" 模式
@@ -128,22 +122,18 @@ type WebpackPlugin struct {
 // NewWebpackPlugin 创建插件
 func NewWebpackPlugin() *WebpackPlugin {
 	return &WebpackPlugin{
-		webpackMarkerRe:    regexp.MustCompile(`__webpack_require__|__webpack_exports__|webpackJsonp`),
 		publicPathRe:       regexp.MustCompile(`(?:__webpack_require__\.\w+|window\.__webpack_public_path__|window\.resourceBaseUrl|[a-z]\.p)\s*=\s*["']([^"']+)["']`),
 		chunkHashMapRe:     regexp.MustCompile(`"(chunk-[0-9a-f]+)"\s*:\s*"([0-9a-f]+)"`),
 		chunkNumericHashRe: regexp.MustCompile(`[\{,]\s*(\d+)\s*:\s*["']([a-f0-9]{20,24})["']`),
 		// 匹配箭头函数格式: X.u=Y=>"prefix/"+Y+"-"+{...}[Y]+".suffix"
 		lTypeRe: regexp.MustCompile(`\.\w+\s*=\s*\w+\s*=>\s*"([^"]+)"\s*\+\s*\w+\s*\+\s*"([^"]+)"\s*\+\s*\{([^}]+)\}\[\w+\]\s*\+\s*"([^"]+)"`),
 		// 匹配 webpack runtime chunk URL 函数: X.u=function(Y){...或 X.u=Y=>...
-		webpackRuntimeChunkUrlRe: regexp.MustCompile(`\.\w+\s*=\s*(?:function\s*\([^)]*\)|\w+\s*=>)\s*[^}]+\{\s*[^}]*\[\s*[^\]]*\]\s*[^}]*\}`),
-		webpackChunkRe:           regexp.MustCompile(`webpackChunk_([a-zA-Z_][a-zA-Z0-9_]*)\s*=`),
-		chunkPushRe:              regexp.MustCompile(`\.\s*push\s*\(\s*\[\s*\[\s*(\d+)\s*\]`),
+		chunkPushRe: regexp.MustCompile(`\.\s*push\s*\(\s*\[\s*\[\s*(\d+)\s*\]`),
 		// 匹配数字 hash 映射表中的单个条目: 10:"ce0ccf4f" 或 209:"d48a70eb"
 		numericHashMapRe: regexp.MustCompile(`(\d+):"([a-f0-9]{6,10})"`),
 		// 匹配箭头函数 chunk 路径前缀: X.u=Y=>"js/"+Y+"-"+...+".js"
 		arrowFunctionPathPrefixRe: regexp.MustCompile(`\.\w+\s*=\s*\w+\s*=>\s*"([^"]+)"\s*\+\s*\w+\s*\+\s*"-"`),
 		// 匹配 rspack/webpack runtime hash mapping: {1124:"7ca513dc",...} (数字作为 key)
-		rspackHashMapRe: regexp.MustCompile(`\{(\d+):"([a-f0-9]{5,40})"`),
 		// 匹配 webpackChunk_xxx.push([[id], {...}]) 的 chunk ID 和 hash
 		// 格式: webpackChunk_xxx.push([[449],{85449:function(e,t,n){"use strict"...}])
 		// 或带 hash 的: webpackChunk_xxx.push([[449],{...}]) 后续有 {449:"hash"}
@@ -154,7 +144,6 @@ func NewWebpackPlugin() *WebpackPlugin {
 		// X.u=function(Y){return Y+".95f73b75.js"} 格式
 		webpackChunkURLBuilderRe: regexp.MustCompile(`\.\w+\s*=\s*function\s*\(\w+\)\s*\{\s*return\s*\w+\s*\+\s*"\.([[:alnum:]]+)\.js"\s*\}`),
 		// 匹配 Webpack 5 chunk URL 函数: function(X){return""+X+"."+{id:hash}[X]+".js"}
-		webpackChunkURLBuilderV5Re: regexp.MustCompile(`\.\w+\s*=\s*function\s*\(\s*\w+\s*\)\s*\{\s*return\s*[^}]+\+"\.([[:alnum:]]+)\.js"\s*\}`),
 		// 匹配 Webpack chunk 动态加载调用: .X(449) 或 .X(449).then(...)
 		webpackChunkLoadCallRe: regexp.MustCompile(`\.\w+\s*\(\s*(\d+)\s*\)`),
 		// 匹配字符串 chunk ID 的动态加载: xxx("chunk-xxx") 或 xxx("chunk-xxx").then(...)
@@ -171,7 +160,6 @@ func NewWebpackPlugin() *WebpackPlugin {
 		// 备用路径前缀正则（用于 X.p+"path/" 格式）
 		webpackPathPrefixAltRe: regexp.MustCompile(`\+\s*["'](/?static/js/)["']`),
 		// 通用 publicPath 赋值: X.Y="..." 或 X.Y="..."+... 形式 (不依赖变量名)
-		webpackPublicPathAssignRe: regexp.MustCompile(`\.\w+\s*=\s*(?:function\s*\([^)]*\)\s*\{[^}]*\}|"[^"]*"|[^;,]+)`),
 		// webpack runtime 中 "prefix" + X + "-" + {...}[X] + ".suffix" 模式
 		// 匹配: "js/"+e+"-"+{...}[e]+".js"
 		webpackChunkMapPatternRe: regexp.MustCompile(`"([^"]*)"\s*\+\s*\w+\s*\+\s*"([^"]*)"\s*\+\s*\(?\{([^}]+)\}\)?\[\w+\]\s*\+\s*"([^"]*)"`),
