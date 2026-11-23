@@ -92,6 +92,9 @@ type WebpackPlugin struct {
 	fallbackRe *regexp.Regexp
 	// ID -> value 正则
 	idValueRe *regexp.Regexp
+	// chunk 映射条目：key 可以是数字、带引号字符串或标识符（rspack 2.3 起
+	// chunk id 用 base36，如 {"4l":"views-dashboard",c:"tpl-0",kd:"views-metrics"}）
+	chunkMapEntryRe *regexp.Regexp
 	// webpackChunkMapPatternRe 分支内 hash 映射条目提取（仅在映射表字符串内使用）
 	mapNumericHashRe   *regexp.Regexp
 	mapQuotedKeyHashRe *regexp.Regexp
@@ -176,7 +179,9 @@ func NewWebpackPlugin() *WebpackPlugin {
 		minimalRuntimeRe: regexp.MustCompile(`=\s*function\s*\(\w+\)\s*\{\s*return\s*"[^"]*"\s*\+\s*\w+\s*\+\s*"[^"]*"\s*\+\s*\(?\{[^}]*\}\)?\[\w+\]\s*\+\s*"\.js"`),
 		// h.u=e=>"prefix/"+((nameMap)[e]||e)+"."+(hashMap)[e]+".js" 模式
 		// 匹配: "prefix"+((nameMap)[e]||e)+"."+(hashMap)[e]+".js"
-		webpackStaticChunkPatternRe: regexp.MustCompile(`"([^"]+/)"\s*\+\s*\(\s*\(([^)]+)\)\[\w+\]\s*\|\|\s*\w+\s*\)\s*\+\s*"\."\s*\+\s*\(([^)]+)\)\[\w+\]\s*\+\s*"\.js"`),
+		// 括号可选：rsbuild/rspack 2.x 会写成 (({names})[e]||e)+"."+({hashes})[e]，
+		// modern.js 3.12 则写成 (({names}[e]||e)+"."+{hashes}[e] —— 两种都要能匹配。
+		webpackStaticChunkPatternRe: regexp.MustCompile(`"([^"]+/)"\s*\+\s*\(\s*\(?([^()]+?)\)?\s*\[\w+\]\s*\|\|\s*\w+\s*\)\s*\+\s*"\."\s*\+\s*\(?([^()]+?)\)?\s*\[\w+\]\s*\+\s*"\.js"`),
 		// a.u=function(c){return"js/chunk/"+{name:path}[c]+"."+{id:hash}[c]+".js"} 格式
 		// 匹配: "js/chunk/"+{id:"name"}[c]+"."+{id:"hash"}[c]+".js"
 		webpackChunkReturnPatternRe: regexp.MustCompile(`"([^"]+/)"\s*\+\s*\{[^}]+\}\[\w+\]\s*\+\s*"\."\s*\+\s*\{[^}]+\}\[\w+\]\s*\+\s*"\.js"`),
@@ -199,6 +204,8 @@ func NewWebpackPlugin() *WebpackPlugin {
 		fallbackRe: regexp.MustCompile(`\+\s*["']([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+/)["']`),
 		// ID -> value 正则
 		idValueRe: regexp.MustCompile(`(\d+):"([^"]+)"`),
+		// 混合 key（数字 / 引号字符串 / 标识符）的映射条目
+		chunkMapEntryRe: regexp.MustCompile("\"([^\"]+)\"\\s*:\\s*\"([^\"]*)\"|([A-Za-z_$][A-Za-z0-9_$]*)\\s*:\\s*\"([^\"]*)\"|(\\d+)\\s*:\\s*\"([^\"]*)\""),
 		// webpackChunkMapPatternRe 分支内 hash 映射条目提取（仅在映射表字符串内使用）
 		//   - 数字 key: 153:"3fc109f0"
 		//   - 带引号字符串 key: "page2-extra":"c6724a6f"
@@ -224,6 +231,33 @@ func NewWebpackPlugin() *WebpackPlugin {
 
 func (p *WebpackPlugin) Name() string {
 	return "WebpackPlugin"
+}
+
+// parseChunkMap 解析内联 chunk 映射表字面量。key 支持数字、带引号字符串和
+// 单字符标识符 —— rspack 2.3 起 chunk id 是 base36，映射表长这样：
+//
+//	{1:"tpl-1","4l":"views-dashboard",c:"tpl-0",c8:"views-detail",k:"views-about"}
+//
+// 旧的 idValueRe/mapQuotedKeyValueRe/mapIdentKeyValueRe 只覆盖数字 key、
+// 字母开头的 ≥2 字符 key，会漏掉 "4l" 与 c/k/l/o 这类单字符 key（实测
+// rsbuild 2.3.3 因此 15 个异步 chunk 只发现 4 个）。
+func (p *WebpackPlugin) parseChunkMap(s string) map[string]string {
+	out := make(map[string]string)
+	for _, m := range p.chunkMapEntryRe.FindAllStringSubmatch(s, -1) {
+		var key, val string
+		switch {
+		case m[1] != "":
+			key, val = m[1], m[2]
+		case m[3] != "":
+			key, val = m[3], m[4]
+		case m[5] != "":
+			key, val = m[5], m[6]
+		default:
+			continue
+		}
+		out[key] = val
+	}
+	return out
 }
 
 // extractChunkNameHashMaps 从运行时内容中提取 chunk 名/哈希映射。
@@ -409,16 +443,14 @@ func (p *WebpackPlugin) Analyze(ctx context.Context, input *extractor.AnalyzeInp
 
 		// 内联字面量映射（rsbuild 等打包器直接内联在 u 函数里）
 		if strings.HasPrefix(strings.TrimSpace(nameMapVar), "{") {
-			for _, m := range p.idValueRe.FindAllStringSubmatch(nameMapVar, -1) {
-				if len(m) > 2 {
-					nameMap[m[1]] = m[2]
-				}
-			}
+			nameMap = p.parseChunkMap(nameMapVar)
 		}
 		if strings.HasPrefix(strings.TrimSpace(hashMapVar), "{") {
-			for _, m := range p.mapNumericHashRe.FindAllStringSubmatch(hashMapVar, -1) {
-				if len(m) > 2 {
-					hashMap[m[1]] = m[2]
+			hashMap = p.parseChunkMap(hashMapVar)
+			// 只保留看起来像 hash 的值（3-40 位 alnum），防止把别的东西当 hash
+			for id, val := range hashMap {
+				if len(val) < 3 || len(val) > 40 {
+					delete(hashMap, id)
 				}
 			}
 		}

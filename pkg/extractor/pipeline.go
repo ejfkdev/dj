@@ -1983,6 +1983,15 @@ func (p *Pipeline) probeFragment(fragment, sourceURL string) []string {
 	}
 
 	// 分析 fragment 结构
+	// 相对路径（./ 或 ../）以 sourceURL 为基准解析：打包器会在动态 import 里
+	// 写 "./chunk-xxx.js"（vite / @module-federation/vite 产物常见），其目录
+	// 就是当前文件所在目录。旧逻辑把 "./" 当成路径前缀去匹配 knownPath，匹配
+	// 不到就退化成「站点根 + 文件名」，导致 404（mf-vite 的 pendingShares 即此）。
+	if strings.HasPrefix(fragment, "./") || strings.HasPrefix(fragment, "../") {
+		if resolved := ResolveRelativePath(sourceURL, fragment); resolved != "" {
+			return []string{resolved}
+		}
+	}
 	// 提取路径部分（如 "static/js/async/"）和文件名（如 "test.js"）
 	fragmentHasPath := strings.Contains(fragment, "/")
 	var fragmentPath string
@@ -2198,8 +2207,17 @@ func isLikelyJSContent(content []byte, contentTypeHeader string) bool {
 		return false
 	}
 	body := bytes.TrimSpace(content)
+	// 明确声明是 JS 的类型：直接信任（空体也一样——真实 bundler 会产出 0 字节
+	// chunk，例如 bun 的空 chunk 仍以 text/javascript 提供；而统计/追踪端点
+	// 的空响应一般是 text/plain、text/html 或 image/*，下面仍会被拒绝）
+	explicitJS := false
+	switch ct {
+	case "application/javascript", "text/javascript", "application/x-javascript",
+		"application/ecmascript", "text/ecmascript", "application/node", "module":
+		explicitJS = true
+	}
 	if len(body) == 0 {
-		return false // 空响应（统计/追踪端点）不是可提取的 JS
+		return explicitJS
 	}
 	// 魔数/前缀嗅探：图片与标记语言
 	if bytes.HasPrefix(body, []byte("GIF8")) ||
@@ -2213,9 +2231,7 @@ func isLikelyJSContent(content []byte, contentTypeHeader string) bool {
 		return false
 	}
 	// 明确声明是 JS 的类型：直接信任
-	switch ct {
-	case "application/javascript", "text/javascript", "application/x-javascript",
-		"application/ecmascript", "text/ecmascript", "application/node", "module":
+	if explicitJS {
 		return true
 	}
 	// 模糊类型（text/plain、application/octet-stream、缺失等）：必须内容像 JS。
